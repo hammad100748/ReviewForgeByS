@@ -25,6 +25,15 @@ export default function App() {
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [togglingCustomers, setTogglingCustomers] = useState({});
 
+  // Add Customer Modal State
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustEmail, setNewCustEmail] = useState('');
+  const [newCustPackage, setNewCustPackage] = useState('');
+  const [selectedJsonFile, setSelectedJsonFile] = useState(null);
+  const [submittingCustomer, setSubmittingCustomer] = useState(false);
+  const [modalError, setModalError] = useState('');
+
   // Notification Banners
   const [errorBanner, setErrorBanner] = useState('');
   const [successBanner, setSuccessBanner] = useState('');
@@ -38,7 +47,6 @@ export default function App() {
       const json = await res.json();
       if (json.success) {
         setReviews(json.data || []);
-        // Initialize edited text state map
         const textMap = {};
         (json.data || []).forEach(r => {
           textMap[r.id] = r.draftReply || '';
@@ -183,6 +191,82 @@ export default function App() {
     }
   };
 
+  // Action: Create New Customer
+  const handleCreateCustomer = async (e) => {
+    e.preventDefault();
+    setModalError('');
+
+    if (!newCustName.trim()) {
+      setModalError('Customer Name is required.');
+      return;
+    }
+    if (!newCustEmail.trim()) {
+      setModalError('Customer Email is required.');
+      return;
+    }
+    if (!newCustPackage.trim()) {
+      setModalError('Package Name is required.');
+      return;
+    }
+    if (!selectedJsonFile) {
+      setModalError('Please upload a Service Account JSON file.');
+      return;
+    }
+
+    setSubmittingCustomer(true);
+
+    try {
+      // Read file client-side
+      const fileText = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => resolve(event.target.result);
+        reader.onerror = (err) => reject(new Error('Failed to read uploaded file.'));
+        reader.readAsText(selectedJsonFile);
+      });
+
+      let parsedJson;
+      try {
+        parsedJson = JSON.parse(fileText);
+      } catch (e) {
+        throw new Error('Uploaded file is not valid JSON.');
+      }
+
+      if (!parsedJson.client_email || !parsedJson.private_key) {
+        throw new Error('Service Account JSON is missing required fields (client_email, private_key).');
+      }
+
+      const res = await fetch(`${API_BASE}/customers/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newCustName.trim(),
+          email: newCustEmail.trim(),
+          packageName: newCustPackage.trim(),
+          serviceAccountJson: parsedJson,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (json.success) {
+        setShowAddModal(false);
+        setNewCustName('');
+        setNewCustEmail('');
+        setNewCustPackage('');
+        setSelectedJsonFile(null);
+        setSuccessBanner(`Customer '${json.data.name}' created successfully (Status: Awaiting Verification).`);
+        fetchCustomers();
+      } else {
+        setModalError(json.error || 'Failed to create customer.');
+      }
+
+    } catch (err) {
+      setModalError(err.message);
+    } finally {
+      setSubmittingCustomer(false);
+    }
+  };
+
   return (
     <div className="app-container">
       {/* Header Bar */}
@@ -317,9 +401,14 @@ export default function App() {
         <main>
           <div className="section-title">
             <span>Customer Settings & Auto-Post Configuration</span>
-            <button className="refresh-btn" onClick={fetchCustomers} disabled={loadingCustomers}>
-              {loadingCustomers ? 'Refreshing...' : '↻ Refresh Customers'}
-            </button>
+            <div className="header-actions">
+              <button className="btn-add-customer" onClick={() => { setModalError(''); setShowAddModal(true); }}>
+                + Add Customer
+              </button>
+              <button className="refresh-btn" onClick={fetchCustomers} disabled={loadingCustomers}>
+                {loadingCustomers ? 'Refreshing...' : '↻ Refresh Customers'}
+              </button>
+            </div>
           </div>
 
           {loadingCustomers ? (
@@ -330,19 +419,27 @@ export default function App() {
             <div className="empty-state">
               <div className="empty-state-icon">👥</div>
               <h3>No active customers found</h3>
-              <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>Use <code>npm run add-customer</code> in the backend to onboard new customers.</p>
+              <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>Click "+ Add Customer" above to onboard a new customer.</p>
             </div>
           ) : (
             <div className="customers-list">
               {customers.map(customer => {
                 const isToggling = togglingCustomers[customer.id];
                 const isEnabled = customer.autoPostEnabled;
+                const isAwaiting = customer.onboardingStatus === 'AWAITING_VERIFICATION';
 
                 return (
                   <div key={customer.id} className="customer-row">
-                    <div className="customer-meta">
-                      <h3>{customer.name}</h3>
-                      <p>{customer.packageName} • {customer.email}</p>
+                    <div className="customer-info-group">
+                      <div className="customer-meta">
+                        <h3>
+                          {customer.name}
+                          <span className={`badge-status ${isAwaiting ? 'awaiting' : 'active'}`}>
+                            {isAwaiting ? 'Awaiting Verification' : 'Active'}
+                          </span>
+                        </h3>
+                        <p>{customer.packageName} • {customer.email}</p>
+                      </div>
                     </div>
 
                     <div className="toggle-wrapper">
@@ -365,6 +462,92 @@ export default function App() {
             </div>
           )}
         </main>
+      )}
+
+      {/* Add Customer Modal */}
+      {showAddModal && (
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Add New Customer</h2>
+              <button className="modal-close-btn" onClick={() => setShowAddModal(false)}>✕</button>
+            </div>
+
+            {modalError && (
+              <div className="banner banner-error" style={{ marginBottom: '1rem' }}>
+                <span>⚠️ {modalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateCustomer} className="modal-body">
+              <div className="form-group">
+                <label>Customer Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Acme Corp"
+                  value={newCustName}
+                  onChange={(e) => setNewCustName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Customer Email</label>
+                <input
+                  type="email"
+                  className="form-input"
+                  placeholder="admin@example.com"
+                  value={newCustEmail}
+                  onChange={(e) => setNewCustEmail(e.target.value)}
+                  required
+                />
+                <span className="field-hint">Customer must sign up using this exact email</span>
+              </div>
+
+              <div className="form-group">
+                <label>Android Package Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. com.example.myapp"
+                  value={newCustPackage}
+                  onChange={(e) => setNewCustPackage(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Google Service Account JSON Key File</label>
+                <input
+                  type="file"
+                  accept=".json"
+                  className="file-input"
+                  onChange={(e) => setSelectedJsonFile(e.target.files[0] || null)}
+                  required
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowAddModal(false)}
+                  disabled={submittingCustomer}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={submittingCustomer}
+                >
+                  {submittingCustomer ? 'Encrypting & Saving...' : 'Create Customer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -86,6 +86,34 @@ async function getPendingReviews() {
 }
 
 /**
+ * Retrieves all review documents with status 'pending_approval' belonging to a specific customer.
+ * @param {string} customerId Firestore Customer ID
+ * @returns {Promise<Array<Object>>} List of pending review objects for the customer
+ */
+async function getPendingReviewsByCustomer(customerId) {
+  if (!customerId) return [];
+
+  const snapshot = await db
+    .collection(REVIEWS_COLLECTION)
+    .where('customerId', '==', customerId)
+    .where('status', '==', 'pending_approval')
+    .get();
+
+  const reviews = [];
+
+  snapshot.forEach((doc) => {
+    const data = doc.data();
+    reviews.push({
+      id: doc.id,
+      ...data,
+      createdAt: data.createdAt ? data.createdAt.toDate() : null,
+    });
+  });
+
+  return reviews;
+}
+
+/**
  * Fetches a single review document from Firestore by its document ID.
  * @param {string} docId Firestore Document ID
  * @returns {Promise<Object|null>} Review document object or null if not found
@@ -146,6 +174,7 @@ module.exports = {
   saveDraftReview,
   reviewExists,
   getPendingReviews,
+  getPendingReviewsByCustomer,
   getReviewById,
   updateReviewStatus,
 };

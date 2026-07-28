@@ -1,6 +1,6 @@
 # ReviewForge Backend
 
-ReviewForge backend service for securely storing customer credentials, managing Google Play Developer API access, detecting app reviews, generating AI response drafts via DeepSeek, approving/posting replies to Google Play, and providing a REST API interface.
+ReviewForge backend service for securely storing customer credentials, managing Google Play Developer API access, detecting app reviews, generating AI response drafts via DeepSeek, approving/posting replies to Google Play, providing a REST API interface, and managing customer onboarding via the Admin Dashboard and Customer Portal.
 
 ---
 
@@ -59,32 +59,23 @@ The server runs on `http://localhost:3001` (or your configured `PORT`) with CORS
 
 ### API Endpoint Summary
 
-| Method | Endpoint | Description | Request Body |
+| Method | Endpoint | Protection | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/reviews/pending` | Fetch all reviews pending human approval | *None* |
-| `POST` | `/api/reviews/:docId/approve` | Approve and post current AI draft reply to Google Play as-is | *None* |
-| `POST` | `/api/reviews/:docId/edit-approve` | Overwrite draft reply text and post immediately to Google Play | `{ "newText": "..." }` |
-| `POST` | `/api/reviews/:docId/reject` | Mark review draft status as `"rejected"` | *None* |
-| `GET` | `/api/customers` | List all active customers *(credentials stripped for security)* | *None* |
-| `POST` | `/api/customers/:customerId/autopost` | Toggle Auto-Post mode for a customer | `{ "enabled": true/false }` |
-
-### JSON Response Format
-
-- **Success Response (`200 OK`)**:
-  ```json
-  {
-    "success": true,
-    "data": { ... }
-  }
-  ```
-
-- **Error Response (`400 Bad Request` / `404 Not Found` / `500 Internal Server Error`)**:
-  ```json
-  {
-    "success": false,
-    "error": "Error description message"
-  }
-  ```
+| `GET` | `/api/customer/me` | Bearer Token | Fetch authenticated customer profile & service account email |
+| `POST` | `/api/customer/verify-connection` | Bearer Token | Perform live `reviews.list` check & update status to `"ACTIVE"` |
+| `POST` | `/api/customer/autopost` | Bearer Token | Self-serve toggle Auto-Post mode for logged-in customer |
+| `GET` | `/api/customer/reviews/pending` | Bearer Token | Fetch pending reviews strictly scoped to logged-in customer |
+| `POST` | `/api/customer/reviews/:docId/approve` | Bearer Token | Approve and post reply (with ownership verification) |
+| `POST` | `/api/customer/reviews/:docId/edit-approve` | Bearer Token | Edit and post reply (with ownership verification) |
+| `POST` | `/api/customer/reviews/:docId/reject` | Bearer Token | Reject review draft (with ownership verification) |
+| `GET` | `/api/reviews/pending` | Public | Admin: Fetch all pending reviews |
+| `POST` | `/api/reviews/:docId/approve` | Public | Admin: Approve & post draft reply |
+| `POST` | `/api/reviews/:docId/edit-approve` | Public | Admin: Edit & post draft reply |
+| `POST` | `/api/reviews/:docId/reject` | Public | Admin: Reject draft reply |
+| `GET` | `/api/customers/by-email` | Public | Check if customer email is pre-provisioned in Firestore (`?email=...`) |
+| `GET` | `/api/customers` | Public | Admin: List all active customers *(credentials stripped)* |
+| `POST` | `/api/customers/create` | Public | Admin: Pre-provision a new customer record |
+| `POST` | `/api/customers/:customerId/autopost` | Public | Admin: Toggle Auto-Post mode for a customer |
 
 ---
 
@@ -96,27 +87,18 @@ The server runs on `http://localhost:3001` (or your configured `PORT`) with CORS
 >
 > **Default Setting**: By default, `autoPostEnabled` is `false` for all customers.
 
-### Toggling Auto-Post Mode via CLI or API
-- **Via CLI**:
-  ```bash
-  npm run toggle-autopost
-  ```
-- **Via REST API**:
-  ```bash
-  curl -X POST http://localhost:3001/api/customers/CUSTOMER_ID/autopost \
-    -H "Content-Type: application/json" \
-    -d '{"enabled": true}'
-  ```
-
 ---
 
-## 👥 Customer Management CLI
+## 👥 Customer Management CLI & Admin Dashboard
 
-```bash
-npm run add-customer
-# or
-node scripts/add-customer.js
-```
+- **Via Admin Dashboard UI**:
+  Launch the frontend dashboard (`cd frontend && npm run dev`) and click the **"+ Add Customer"** button on the Customers tab.
+- **Via CLI (Fallback Option)**:
+  ```bash
+  npm run add-customer
+  # or
+  node scripts/add-customer.js
+  ```
 
 ---
 

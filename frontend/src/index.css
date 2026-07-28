@@ -133,6 +133,12 @@ body {
   justify-content: space-between;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .refresh-btn {
   background-color: var(--bg-card);
   color: var(--text-muted);
@@ -147,6 +153,25 @@ body {
 .refresh-btn:hover {
   color: var(--text-main);
   border-color: #4b5563;
+}
+
+.btn-add-customer {
+  background-color: var(--gold);
+  color: #0f1115;
+  font-weight: 700;
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-add-customer:hover {
+  background-color: var(--gold-hover);
 }
 
 /* Banners & Messages */
@@ -365,17 +390,47 @@ body {
   align-items: center;
 }
 
+.customer-info-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 .customer-meta h3 {
   font-size: 1.1rem;
   font-weight: 600;
   color: #ffffff;
   margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .customer-meta p {
   font-size: 0.85rem;
   color: var(--text-muted);
   font-family: monospace;
+}
+
+.badge-status {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badge-status.awaiting {
+  background-color: rgba(245, 197, 24, 0.2);
+  color: var(--gold);
+  border: 1px solid rgba(245, 197, 24, 0.4);
+}
+
+.badge-status.active {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: var(--mint);
+  border: 1px solid rgba(16, 185, 129, 0.4);
 }
 
 /* Toggle Switch Component */
@@ -441,4 +496,138 @@ input:checked + .slider {
 
 input:checked + .slider:before {
   transform: translateX(22px);
+}
+
+/* Modal Overlay & Form */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1.5rem;
+}
+
+.modal-container {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 520px;
+  padding: 1.75rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
+.modal-close-btn:hover {
+  color: #ffffff;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.form-group label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.form-input {
+  background-color: #121419;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.65rem 0.85rem;
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-family: var(--font-family);
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.file-input {
+  background-color: #121419;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  padding: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: var(--gold);
+  margin-top: 2px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.btn-secondary {
+  background-color: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+  color: #ffffff;
+  border-color: #4b5563;
+}
+
+.btn-primary {
+  background-color: var(--gold);
+  color: #0f1115;
+  font-weight: 700;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--gold-hover);
 }
