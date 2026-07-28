@@ -1,0 +1,14 @@
+{
+  "name": "reviewforge-test-connection",
+  "version": "1.0.0",
+  "description": "Proof-of-concept scripts testing Google Play Developer API connection and replies",
+  "main": "test-connection.js",
+  "scripts": {
+    "start": "node test-connection.js",
+    "test-connection": "node test-connection.js",
+    "test-reply": "node test-reply.js"
+  },
+  "dependencies": {
+    "googleapis": "^144.0.0"
+  }
+}
