@@ -1,14 +1,23 @@
 {
-  "name": "reviewforge-test-connection",
+  "name": "reviewforge-backend",
   "version": "1.0.0",
-  "description": "Proof-of-concept scripts testing Google Play Developer API connection and replies",
-  "main": "test-connection.js",
+  "description": "ReviewForge backend for managing customer Google Play Developer API credentials and automated review management",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node test-connection.js",
+    "start": "node src/index.js",
     "test-connection": "node test-connection.js",
-    "test-reply": "node test-reply.js"
+    "test-reply": "node test-reply.js",
+    "add-customer": "node scripts/add-customer.js",
+    "run-detection": "node scripts/run-detection.js",
+    "approve-review": "node scripts/approve-review.js",
+    "toggle-autopost": "node scripts/toggle-autopost.js"
   },
   "dependencies": {
-    "googleapis": "^144.0.0"
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.0.2",
+    "googleapis": "^144.0.0",
+    "node-cron": "^3.0.3"
   }
 }

@@ -1,16 +1,15 @@
 # Dependencies
 node_modules/
 
-# Sensitive credentials
+# Sensitive credentials & environment variables
 service-account.json
-*.pem
-*.key
-*.p12
-
-# Environment variables
+firebase-service-account.json
 .env
 .env.local
 .env.*.local
+*.pem
+*.key
+*.p12
 
 # Logs
 *.log
