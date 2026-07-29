@@ -41,7 +41,7 @@ async function executeScheduledCycle() {
 function startServer() {
   const app = express();
 
-  // Configurable CORS Setup (Allows localhost dev + custom ALLOWED_FRONTEND_ORIGIN environment variable)
+  // Configurable CORS Setup (Allows localhost dev + custom ALLOWED_FRONTEND_ORIGINS environment variable)
   const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:5174',
@@ -51,8 +51,9 @@ function startServer() {
     'http://127.0.0.1:5174',
   ];
 
-  if (process.env.ALLOWED_FRONTEND_ORIGIN) {
-    const extraOrigins = process.env.ALLOWED_FRONTEND_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
+  const envOriginsStr = process.env.ALLOWED_FRONTEND_ORIGINS || process.env.ALLOWED_FRONTEND_ORIGIN || '';
+  if (envOriginsStr) {
+    const extraOrigins = envOriginsStr.split(',').map((o) => o.trim()).filter(Boolean);
     allowedOrigins.push(...extraOrigins);
   }
 
