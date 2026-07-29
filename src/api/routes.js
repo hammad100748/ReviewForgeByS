@@ -650,6 +650,39 @@ router.post('/reviews/:docId/reject', requireAdminBasicAuth, async (req, res) =>
 // ============================================================================
 
 /**
+ * Shared Handler for fetching active customers.
+ * Protected by HTTP Basic Auth.
+ * SECURITY: Decrypted service account JSON credentials are NEVER returned in this response.
+ */
+const getActiveCustomersHandler = async (req, res) => {
+  try {
+    const customers = await getAllActiveCustomers();
+
+    // Strip sensitive service account credentials before returning JSON
+    const safeCustomers = customers.map(({ serviceAccountJson, encryptedServiceAccount, ...safeCustomer }) => safeCustomer);
+
+    return res.status(200).json({
+      success: true,
+      data: safeCustomers,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch customers: ${error.message}`,
+    });
+  }
+};
+
+/**
+ * GET /api/customers
+ * GET /api/admin/customers
+ * Returns all active customers.
+ * Protected by HTTP Basic Auth.
+ */
+router.get('/customers', requireAdminBasicAuth, getActiveCustomersHandler);
+router.get('/admin/customers', requireAdminBasicAuth, getActiveCustomersHandler);
+
+/**
  * GET /api/customers/by-email?email=x@example.com
  * Looks up a customer record by email in Firestore for access control.
  * Public endpoint used by customer-frontend before sign up / log in.
@@ -687,31 +720,6 @@ router.get('/customers/by-email', async (req, res) => {
     return res.status(500).json({
       success: false,
       error: `Failed to check customer email: ${error.message}`,
-    });
-  }
-});
-
-/**
- * GET /api/customers
- * Returns all active customers.
- * Protected by HTTP Basic Auth.
- * SECURITY: Decrypted service account JSON credentials are NEVER returned in this response.
- */
-router.get('/customers', requireAdminBasicAuth, async (req, res) => {
-  try {
-    const customers = await getAllActiveCustomers();
-
-    // Strip sensitive service account credentials before returning JSON
-    const safeCustomers = customers.map(({ serviceAccountJson, encryptedServiceAccount, ...safeCustomer }) => safeCustomer);
-
-    return res.status(200).json({
-      success: true,
-      data: safeCustomers,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: `Failed to fetch customers: ${error.message}`,
     });
   }
 });
