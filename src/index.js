@@ -41,6 +41,18 @@ async function executeScheduledCycle() {
 function startServer() {
   const app = express();
 
+  // Startup Check for Admin HTTP Basic Auth Credentials
+  if (
+    !process.env.ADMIN_USERNAME ||
+    !process.env.ADMIN_PASSWORD ||
+    !process.env.ADMIN_USERNAME.trim() ||
+    !process.env.ADMIN_PASSWORD.trim()
+  ) {
+    console.warn(
+      `\n⚠️  [WARNING] ADMIN_USERNAME or ADMIN_PASSWORD environment variables are missing! Admin dashboard routes will reject all requests (fail closed). Set ADMIN_USERNAME and ADMIN_PASSWORD in your environment.\n`
+    );
+  }
+
   // Configurable CORS Setup (Allows localhost dev + custom ALLOWED_FRONTEND_ORIGINS environment variable)
   const allowedOrigins = [
     'http://localhost:5173',

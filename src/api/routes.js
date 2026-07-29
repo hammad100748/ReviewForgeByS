@@ -38,9 +38,21 @@ router.get('/health', (req, res) => {
 
 /**
  * Middleware enforcing HTTP Basic Auth for Admin routes.
- * Compares credentials against process.env.ADMIN_USERNAME and process.env.ADMIN_PASSWORD.
+ * Compares credentials strictly against process.env.ADMIN_USERNAME and process.env.ADMIN_PASSWORD (fail closed).
  */
 function requireAdminBasicAuth(req, res, next) {
+  const expectedUsername = process.env.ADMIN_USERNAME;
+  const expectedPassword = process.env.ADMIN_PASSWORD;
+
+  // Fail closed if server environment variables are missing or unconfigured
+  if (!expectedUsername || !expectedPassword || !expectedUsername.trim() || !expectedPassword.trim()) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="ReviewForge Admin Dashboard"');
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized: Admin authentication credentials not configured on server.',
+    });
+  }
+
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Basic ')) {
@@ -54,9 +66,6 @@ function requireAdminBasicAuth(req, res, next) {
   const base64Credentials = authHeader.split('Basic ')[1];
   const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
   const [username, password] = credentials.split(':');
-
-  const expectedUsername = process.env.ADMIN_USERNAME || 'admin';
-  const expectedPassword = process.env.ADMIN_PASSWORD || 'admin';
 
   if (username !== expectedUsername || password !== expectedPassword) {
     res.setHeader('WWW-Authenticate', 'Basic realm="ReviewForge Admin Dashboard"');
