@@ -7,7 +7,8 @@ import {
 } from 'firebase/auth';
 import { auth } from './firebase';
 
-const API_BASE = 'http://localhost:3001/api';
+const rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+const API_BASE = `${rawApiBaseUrl.replace(/\/$/, '')}/api`;
 
 function StarRating({ rating }) {
   const stars = [];
