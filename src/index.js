@@ -41,8 +41,41 @@ async function executeScheduledCycle() {
 function startServer() {
   const app = express();
 
+  // Configurable CORS Setup (Allows localhost dev + custom ALLOWED_FRONTEND_ORIGIN environment variable)
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+  ];
+
+  if (process.env.ALLOWED_FRONTEND_ORIGIN) {
+    const extraOrigins = process.env.ALLOWED_FRONTEND_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
+    allowedOrigins.push(...extraOrigins);
+  }
+
+  const corsOptions = {
+    origin: function (origin, callback) {
+      // Allow requests with no origin (e.g. mobile apps, curl, or server-to-server calls)
+      if (!origin) return callback(null, true);
+
+      if (
+        allowedOrigins.indexOf(origin) !== -1 ||
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('http://127.0.0.1:')
+      ) {
+        return callback(null, true);
+      } else {
+        return callback(new Error(`CORS policy blocked request from origin: ${origin}`));
+      }
+    },
+    credentials: true,
+  };
+
   // Middleware
-  app.use(cors());
+  app.use(cors(corsOptions));
   app.use(express.json());
 
   // Public Health Check Endpoint (Required for Render & Cloud Deployment Health Checks)
