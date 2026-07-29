@@ -61,6 +61,8 @@ The server runs on `http://localhost:3001` (or your configured `PORT`) with CORS
 
 | Method | Endpoint | Protection | Description |
 | :--- | :--- | :--- | :--- |
+| `GET` | `/health` | Public | Lightweight health check endpoint (`{ status: "ok" }`) |
+| `GET` | `/api/health` | Public | Alias public health check endpoint |
 | `GET` | `/api/customer/me` | Bearer Token | Fetch authenticated customer profile & service account email |
 | `POST` | `/api/customer/verify-connection` | Bearer Token | Perform live `reviews.list` check & update status to `"ACTIVE"` |
 | `POST` | `/api/customer/autopost` | Bearer Token | Self-serve toggle Auto-Post mode for logged-in customer |

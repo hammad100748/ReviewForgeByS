@@ -20,6 +20,19 @@ const { postApprovedReply } = require('../services/postReply');
 const router = express.Router();
 
 // ============================================================================
+// PUBLIC HEALTH CHECK ENDPOINT
+// ============================================================================
+
+/**
+ * GET /health (and /api/health)
+ * Public, lightweight health check endpoint confirming server process status.
+ * Required for Render, Google Cloud Run, and uptime monitoring services.
+ */
+router.get('/health', (req, res) => {
+  return res.status(200).json({ status: 'ok' });
+});
+
+// ============================================================================
 // AUTHENTICATION & ACCESS CONTROL MIDDLEWARE
 // ============================================================================
 

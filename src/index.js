@@ -7,7 +7,6 @@ const apiRouter = require('./api/routes');
 const { runDetectionCycle } = require('./services/detectReviews');
 
 const PORT = process.env.PORT || 3001;
-// const CRON_SCHEDULE = '*/30 * * * *'; // Every 30 minutes
 const CRON_SCHEDULE = '*/30 * * * *'; // Every 30 minutes
 
 /**
@@ -46,6 +45,11 @@ function startServer() {
   app.use(cors());
   app.use(express.json());
 
+  // Public Health Check Endpoint (Required for Render & Cloud Deployment Health Checks)
+  app.get('/health', (req, res) => {
+    return res.status(200).json({ status: 'ok' });
+  });
+
   // Mount API router
   app.use('/api', apiRouter);
 
@@ -56,6 +60,7 @@ function startServer() {
     console.log(`======================================================`);
     console.log(` Status:    SERVER RUNNING (Continuous Process)`);
     console.log(` HTTP API:  Listening on http://localhost:${PORT}`);
+    console.log(` Health:    http://localhost:${PORT}/health`);
     console.log(` Cron:      Every 30 minutes ('${CRON_SCHEDULE}')`);
     console.log(` Started:   [${getTimestamp()}]`);
     console.log(`======================================================\n`);

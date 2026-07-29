@@ -2,12 +2,12 @@ const admin = require('firebase-admin');
 const path = require('path');
 const fs = require('fs');
 
-const FIREBASE_KEY_PATH = path.join(__dirname, '../../firebase-service-account.json');
+const FIREBASE_KEY_PATH = process.env.FIREBASE_KEY_PATH || path.join(__dirname, '../../firebase-service-account.json');
 
 if (!admin.apps.length) {
   if (!fs.existsSync(FIREBASE_KEY_PATH)) {
     throw new Error(
-      `[FIREBASE ERROR] 'firebase-service-account.json' not found in project root.\nExpected file at: ${FIREBASE_KEY_PATH}`
+      `[FIREBASE ERROR] Service account key not found.\nExpected file at: ${FIREBASE_KEY_PATH}`
     );
   }
 
