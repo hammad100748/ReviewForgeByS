@@ -4,7 +4,7 @@
   "description": "ReviewForge backend for managing customer Google Play Developer API credentials and automated review management",
   "main": "src/index.js",
   "scripts": {
-    "start": "nodemon src/index.js",
+    "start": "node src/index.js",
     "test-connection": "node test-connection.js",
     "test-reply": "node test-reply.js",
     "add-customer": "node scripts/add-customer.js",
