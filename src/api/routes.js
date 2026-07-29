@@ -1,6 +1,6 @@
 const express = require('express');
 const { google } = require('googleapis');
-const { admin } = require('../config/firebase');
+const { db, admin } = require('../config/firebase');
 const {
   getPendingReviews,
   getPendingReviewsByCustomer,
@@ -82,6 +82,166 @@ async function verifyCustomerAuth(req, res, next) {
     });
   }
 }
+
+// ============================================================================
+// ADMIN FOUNDER ANALYTICS ENDPOINT
+// ============================================================================
+
+/**
+ * GET /api/admin/analytics
+ * Returns aggregate metrics, performance ratios, and founder follow-up lists.
+ */
+router.get('/admin/analytics', async (req, res) => {
+  try {
+    const nowMs = Date.now();
+    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+    // 1. Fetch all customer documents
+    const custSnapshot = await db.collection('customers').get();
+    const customers = [];
+    custSnapshot.forEach((doc) => {
+      const data = doc.data();
+      customers.push({
+        id: doc.id,
+        ...data,
+        createdAtDate: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : null,
+      });
+    });
+
+    // 2. Fetch all review documents
+    const revSnapshot = await db.collection('reviews').get();
+    const reviews = [];
+    revSnapshot.forEach((doc) => {
+      const data = doc.data();
+      reviews.push({
+        id: doc.id,
+        ...data,
+        createdAtDate: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : null,
+        postedAtDate: data.postedAt ? (data.postedAt.toDate ? data.postedAt.toDate() : new Date(data.postedAt)) : null,
+      });
+    });
+
+    // 3. Aggregate Customer Metrics
+    const totalCustomers = customers.length;
+    const customersByStatus = {};
+    customers.forEach((c) => {
+      const status = c.onboardingStatus || 'AWAITING_VERIFICATION';
+      customersByStatus[status] = (customersByStatus[status] || 0) + 1;
+    });
+
+    const activeCustomers = customers.filter((c) => c.onboardingStatus === 'ACTIVE');
+    const autoPostEnabledCount = activeCustomers.filter((c) => c.autoPostEnabled === true).length;
+    const autoPostDisabledCount = activeCustomers.length - autoPostEnabledCount;
+    const autoPostAdoption = {
+      enabled: autoPostEnabledCount,
+      disabled: autoPostDisabledCount,
+    };
+
+    // 4. Aggregate Review Metrics
+    const totalReviewsProcessed = reviews.length;
+    const reviewsByStatus = {
+      pending_approval: 0,
+      posted: 0,
+      rejected: 0,
+    };
+    reviews.forEach((r) => {
+      const s = r.status || 'pending_approval';
+      reviewsByStatus[s] = (reviewsByStatus[s] || 0) + 1;
+    });
+
+    const postedCount = reviewsByStatus.posted || 0;
+    const rejectedCount = reviewsByStatus.rejected || 0;
+    const totalDecided = postedCount + rejectedCount;
+    const approvalRate = totalDecided > 0 ? Math.round((postedCount / totalDecided) * 100) : null;
+
+    // Edit Rate calculation for posted reviews with originalAiDraft stored
+    const postedWithOriginal = reviews.filter(
+      (r) => r.status === 'posted' && typeof r.originalAiDraft === 'string' && r.originalAiDraft.length > 0
+    );
+    let editRate = null;
+    if (postedWithOriginal.length > 0) {
+      const editedCount = postedWithOriginal.filter(
+        (r) => (r.draftReply || '').trim() !== (r.originalAiDraft || '').trim()
+      ).length;
+      editRate = Math.round((editedCount / postedWithOriginal.length) * 100);
+    }
+
+    // 5. Per-Customer Breakdown
+    const reviewsPerCustomer = customers.map((c) => {
+      const custRev = reviews.filter((r) => r.customerId === c.id);
+      return {
+        customerId: c.id,
+        customerName: c.name || 'Unnamed',
+        packageName: c.packageName || 'Unknown',
+        totalReviews: custRev.length,
+        posted: custRev.filter((r) => r.status === 'posted').length,
+        pending: custRev.filter((r) => r.status === 'pending_approval').length,
+        rejected: custRev.filter((r) => r.status === 'rejected').length,
+      };
+    });
+
+    // 6. Stale Onboarding (AWAITING_VERIFICATION created > 3 days ago)
+    const staleOnboarding = customers
+      .filter((c) => {
+        if (c.onboardingStatus !== 'AWAITING_VERIFICATION') return false;
+        if (!c.createdAtDate) return false;
+        return nowMs - c.createdAtDate.getTime() > threeDaysMs;
+      })
+      .map((c) => {
+        const daysAwaiting = Math.floor((nowMs - c.createdAtDate.getTime()) / (24 * 60 * 60 * 1000));
+        return {
+          id: c.id,
+          name: c.name,
+          email: c.email,
+          packageName: c.packageName,
+          daysAwaiting,
+          createdAt: c.createdAtDate,
+        };
+      });
+
+    // 7. Inactive Customers (ACTIVE customers with 0 reviews posted in last 7 days)
+    const sevenDaysAgoMs = nowMs - sevenDaysMs;
+    const inactiveCustomers = activeCustomers
+      .filter((c) => {
+        const recentPostedCount = reviews.filter((r) => {
+          if (r.customerId !== c.id) return false;
+          if (r.status !== 'posted') return false;
+          if (!r.postedAtDate) return false;
+          return r.postedAtDate.getTime() >= sevenDaysAgoMs;
+        }).length;
+        return recentPostedCount === 0;
+      })
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        packageName: c.packageName,
+      }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        totalCustomers,
+        customersByStatus,
+        autoPostAdoption,
+        totalReviewsProcessed,
+        reviewsByStatus,
+        approvalRate,
+        editRate,
+        reviewsPerCustomer,
+        staleOnboarding,
+        inactiveCustomers,
+      },
+    });
+  } catch (error) {
+    console.error(`[ANALYTICS ERROR] ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to generate analytics: ${error.message}`,
+    });
+  }
+});
 
 // ============================================================================
 // CUSTOMER PORTAL SCOPED REVIEWS, ME, & AUTO-POST ENDPOINTS

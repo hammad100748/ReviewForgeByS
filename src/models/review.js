@@ -28,6 +28,7 @@ async function saveDraftReview({ customerId, packageName, reviewId, authorName, 
     starRating: typeof starRating === 'number' ? starRating : 0,
     reviewText: reviewText || '',
     draftReply: draftReply || '',
+    originalAiDraft: draftReply || '',
     status: status || 'pending_approval',
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   };

@@ -1,29 +1,18 @@
 import React, { useState, useEffect } from 'react';
 
-const API_BASE = 'http://localhost:3001/api';
-
-function StarRating({ rating }) {
-  const stars = [];
-  const numStars = typeof rating === 'number' ? Math.max(1, Math.min(5, rating)) : 0;
-  for (let i = 1; i <= 5; i++) {
-    stars.push(i <= numStars ? '★' : '☆');
-  }
-  return <span className="star-rating" title={`${numStars} out of 5 stars`}>{stars.join('')}</span>;
-}
+const rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+const API_BASE = `${rawApiBaseUrl.replace(/\/$/, '')}/api`;
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('reviews'); // 'reviews' | 'customers'
+  const [activeTab, setActiveTab] = useState('analytics'); // 'analytics' | 'customers'
 
-  // Reviews State
-  const [reviews, setReviews] = useState([]);
-  const [editedTexts, setEditedTexts] = useState({});
-  const [loadingReviews, setLoadingReviews] = useState(false);
-  const [processingDocs, setProcessingDocs] = useState({});
+  // Analytics State
+  const [analytics, setAnalytics] = useState(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
   // Customers State
   const [customers, setCustomers] = useState([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
-  const [togglingCustomers, setTogglingCustomers] = useState({});
 
   // Add Customer Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -38,31 +27,26 @@ export default function App() {
   const [errorBanner, setErrorBanner] = useState('');
   const [successBanner, setSuccessBanner] = useState('');
 
-  // Fetch Pending Reviews
-  const fetchPendingReviews = async () => {
-    setLoadingReviews(true);
+  // Fetch Founder Analytics Metrics
+  const fetchAnalytics = async () => {
+    setLoadingAnalytics(true);
     setErrorBanner('');
     try {
-      const res = await fetch(`${API_BASE}/reviews/pending`);
+      const res = await fetch(`${API_BASE}/admin/analytics`);
       const json = await res.json();
       if (json.success) {
-        setReviews(json.data || []);
-        const textMap = {};
-        (json.data || []).forEach(r => {
-          textMap[r.id] = r.draftReply || '';
-        });
-        setEditedTexts(textMap);
+        setAnalytics(json.data);
       } else {
-        setErrorBanner(`Failed to load pending reviews: ${json.error}`);
+        setErrorBanner(`Failed to load analytics: ${json.error}`);
       }
     } catch (err) {
-      setErrorBanner(`Cannot connect to ReviewForge backend API (http://localhost:3001). Please verify the backend server is running. (${err.message})`);
+      setErrorBanner(`Cannot connect to ReviewForge backend API (${rawApiBaseUrl}). Please verify the backend server is running. (${err.message})`);
     } finally {
-      setLoadingReviews(false);
+      setLoadingAnalytics(false);
     }
   };
 
-  // Fetch Customers
+  // Fetch Customers List
   const fetchCustomers = async () => {
     setLoadingCustomers(true);
     setErrorBanner('');
@@ -75,121 +59,19 @@ export default function App() {
         setErrorBanner(`Failed to load customers: ${json.error}`);
       }
     } catch (err) {
-      setErrorBanner(`Cannot connect to ReviewForge backend API (http://localhost:3001). Please verify the backend server is running. (${err.message})`);
+      setErrorBanner(`Cannot connect to ReviewForge backend API (${rawApiBaseUrl}). Please verify the backend server is running. (${err.message})`);
     } finally {
       setLoadingCustomers(false);
     }
   };
 
   useEffect(() => {
-    if (activeTab === 'reviews') {
-      fetchPendingReviews();
+    if (activeTab === 'analytics') {
+      fetchAnalytics();
     } else if (activeTab === 'customers') {
       fetchCustomers();
     }
   }, [activeTab]);
-
-  // Action: Approve & Post as-is
-  const handleApprove = async (docId) => {
-    setProcessingDocs(prev => ({ ...prev, [docId]: true }));
-    setErrorBanner('');
-    setSuccessBanner('');
-    try {
-      const res = await fetch(`${API_BASE}/reviews/${docId}/approve`, {
-        method: 'POST',
-      });
-      const json = await res.json();
-      if (json.success) {
-        setReviews(prev => prev.filter(r => r.id !== docId));
-        setSuccessBanner(`Review reply approved and posted to Google Play!`);
-      } else {
-        setErrorBanner(`Failed to approve review: ${json.error}`);
-      }
-    } catch (err) {
-      setErrorBanner(`API error during approve: ${err.message}`);
-    } finally {
-      setProcessingDocs(prev => ({ ...prev, [docId]: false }));
-    }
-  };
-
-  // Action: Save Edit & Post
-  const handleEditAndApprove = async (docId) => {
-    const newText = editedTexts[docId] || '';
-    if (!newText.trim()) {
-      setErrorBanner('Reply text cannot be empty.');
-      return;
-    }
-    setProcessingDocs(prev => ({ ...prev, [docId]: true }));
-    setErrorBanner('');
-    setSuccessBanner('');
-    try {
-      const res = await fetch(`${API_BASE}/reviews/${docId}/edit-approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newText: newText.trim() }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setReviews(prev => prev.filter(r => r.id !== docId));
-        setSuccessBanner(`Edited reply successfully posted to Google Play!`);
-      } else {
-        setErrorBanner(`Failed to post edited reply: ${json.error}`);
-      }
-    } catch (err) {
-      setErrorBanner(`API error during edit & approve: ${err.message}`);
-    } finally {
-      setProcessingDocs(prev => ({ ...prev, [docId]: false }));
-    }
-  };
-
-  // Action: Reject
-  const handleReject = async (docId) => {
-    setProcessingDocs(prev => ({ ...prev, [docId]: true }));
-    setErrorBanner('');
-    setSuccessBanner('');
-    try {
-      const res = await fetch(`${API_BASE}/reviews/${docId}/reject`, {
-        method: 'POST',
-      });
-      const json = await res.json();
-      if (json.success) {
-        setReviews(prev => prev.filter(r => r.id !== docId));
-        setSuccessBanner(`Review draft rejected and removed from pending queue.`);
-      } else {
-        setErrorBanner(`Failed to reject review: ${json.error}`);
-      }
-    } catch (err) {
-      setErrorBanner(`API error during reject: ${err.message}`);
-    } finally {
-      setProcessingDocs(prev => ({ ...prev, [docId]: false }));
-    }
-  };
-
-  // Action: Toggle Auto-Post Mode for Customer
-  const handleToggleAutoPost = async (customerId, currentEnabled) => {
-    setTogglingCustomers(prev => ({ ...prev, [customerId]: true }));
-    setErrorBanner('');
-    setSuccessBanner('');
-    const nextState = !currentEnabled;
-    try {
-      const res = await fetch(`${API_BASE}/customers/${customerId}/autopost`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: nextState }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, autoPostEnabled: nextState } : c));
-        setSuccessBanner(`Auto-Post mode ${nextState ? 'ENABLED' : 'DISABLED'} for customer.`);
-      } else {
-        setErrorBanner(`Failed to toggle Auto-Post mode: ${json.error}`);
-      }
-    } catch (err) {
-      setErrorBanner(`API error during toggle: ${err.message}`);
-    } finally {
-      setTogglingCustomers(prev => ({ ...prev, [customerId]: false }));
-    }
-  };
 
   // Action: Create New Customer
   const handleCreateCustomer = async (e) => {
@@ -216,11 +98,10 @@ export default function App() {
     setSubmittingCustomer(true);
 
     try {
-      // Read file client-side
       const fileText = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (event) => resolve(event.target.result);
-        reader.onerror = (err) => reject(new Error('Failed to read uploaded file.'));
+        reader.onerror = () => reject(new Error('Failed to read uploaded file.'));
         reader.readAsText(selectedJsonFile);
       });
 
@@ -259,7 +140,6 @@ export default function App() {
       } else {
         setModalError(json.error || 'Failed to create customer.');
       }
-
     } catch (err) {
       setModalError(err.message);
     } finally {
@@ -267,27 +147,31 @@ export default function App() {
     }
   };
 
+  const hasNeedsAttention = analytics && (
+    (analytics.staleOnboarding && analytics.staleOnboarding.length > 0) ||
+    (analytics.inactiveCustomers && analytics.inactiveCustomers.length > 0)
+  );
+
   return (
     <div className="app-container">
       {/* Header Bar */}
       <header className="header">
         <div className="brand">
           <div className="brand-icon">⚡</div>
-          <h1 className="brand-title">Review<span>Forge</span> Dashboard</h1>
+          <h1 className="brand-title">Review<span>Forge</span> Admin</h1>
         </div>
         <nav className="nav-tabs">
           <button
-            className={`nav-button ${activeTab === 'reviews' ? 'active' : ''}`}
-            onClick={() => setActiveTab('reviews')}
+            className={`nav-button ${activeTab === 'analytics' ? 'active' : ''}`}
+            onClick={() => setActiveTab('analytics')}
           >
-            Pending Reviews
-            {reviews.length > 0 && <span className="badge">{reviews.length}</span>}
+            Analytics
           </button>
           <button
             className={`nav-button ${activeTab === 'customers' ? 'active' : ''}`}
             onClick={() => setActiveTab('customers')}
           >
-            Customers & Auto-Post
+            Customers
           </button>
         </nav>
       </header>
@@ -307,100 +191,146 @@ export default function App() {
         </div>
       )}
 
-      {/* Tab 1: Pending Reviews */}
-      {activeTab === 'reviews' && (
+      {/* TAB 1: FOUNDER ANALYTICS (DEFAULT) */}
+      {activeTab === 'analytics' && (
         <main>
           <div className="section-title">
-            <span>Pending Review Approvals ({reviews.length})</span>
-            <button className="refresh-btn" onClick={fetchPendingReviews} disabled={loadingReviews}>
-              {loadingReviews ? 'Refreshing...' : '↻ Refresh List'}
+            <span>Founder Overview & Platform Performance</span>
+            <button className="refresh-btn" onClick={fetchAnalytics} disabled={loadingAnalytics}>
+              {loadingAnalytics ? 'Refreshing...' : '↻ Refresh Analytics'}
             </button>
           </div>
 
-          {loadingReviews ? (
+          {loadingAnalytics ? (
             <div className="loading-state">
-              <p>Loading pending reviews from backend...</p>
+              <p>Loading analytics from backend...</p>
             </div>
-          ) : reviews.length === 0 ? (
+          ) : !analytics ? (
             <div className="empty-state">
-              <div className="empty-state-icon">🎉</div>
-              <h3>No pending reviews right now</h3>
-              <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>All reviews have been processed or auto-posted.</p>
+              <div className="empty-state-icon">📊</div>
+              <h3>No Analytics Data Available</h3>
+              <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>Verify backend API connection.</p>
             </div>
           ) : (
-            <div className="cards-grid">
-              {reviews.map(review => {
-                const isProcessing = processingDocs[review.id];
-                const currentText = editedTexts[review.id] ?? (review.draftReply || '');
-                const charCount = currentText.length;
-                const isOverLimit = charCount > 350;
-
-                return (
-                  <div key={review.id} className="review-card">
-                    <div className="card-header">
-                      <div className="author-info">
-                        <span className="author-name">{review.authorName || 'Anonymous Reviewer'}</span>
-                        <span className="package-name">{review.packageName}</span>
-                      </div>
-                      <StarRating rating={review.starRating} />
-                    </div>
-
-                    <div className="review-text-box">
-                      "{review.reviewText || '(No text provided)'}"
-                    </div>
-
-                    <div className="draft-section">
-                      <label className="draft-label">AI Draft Reply (Editable)</label>
-                      <textarea
-                        className="draft-textarea"
-                        value={currentText}
-                        onChange={(e) => setEditedTexts({ ...editedTexts, [review.id]: e.target.value })}
-                        disabled={isProcessing}
-                        placeholder="Type AI reply draft..."
-                      />
-                      <div className={`char-counter ${isOverLimit ? 'over-limit' : ''}`}>
-                        {charCount} / 350 characters {isOverLimit && '(Exceeds 350 char limit!)'}
-                      </div>
-                    </div>
-
-                    <div className="card-actions">
-                      <button
-                        className="btn btn-approve"
-                        onClick={() => handleApprove(review.id)}
-                        disabled={isProcessing || isOverLimit}
-                      >
-                        {isProcessing ? 'Posting...' : '✓ Approve & Post'}
-                      </button>
-
-                      <button
-                        className="btn btn-edit"
-                        onClick={() => handleEditAndApprove(review.id)}
-                        disabled={isProcessing || isOverLimit}
-                      >
-                        {isProcessing ? 'Posting...' : '✏️ Save Edit & Post'}
-                      </button>
-
-                      <button
-                        className="btn btn-reject"
-                        onClick={() => handleReject(review.id)}
-                        disabled={isProcessing}
-                      >
-                        {isProcessing ? 'Rejecting...' : '✕ Reject'}
-                      </button>
-                    </div>
+            <div>
+              {/* Top Stat Cards Grid */}
+              <div className="stats-grid">
+                <div className="stat-card">
+                  <div className="stat-header">Total Customers</div>
+                  <div className="stat-number">{analytics.totalCustomers}</div>
+                  <div className="stat-subtitle">
+                    {analytics.customersByStatus.ACTIVE || 0} Active • {analytics.customersByStatus.AWAITING_VERIFICATION || 0} Awaiting
                   </div>
-                );
-              })}
+                </div>
+
+                <div className="stat-card">
+                  <div className="stat-header">Total Reviews Processed</div>
+                  <div className="stat-number">{analytics.totalReviewsProcessed}</div>
+                  <div className="stat-subtitle">
+                    {analytics.reviewsByStatus.posted || 0} Posted • {analytics.reviewsByStatus.rejected || 0} Rejected
+                  </div>
+                </div>
+
+                <div className="stat-card">
+                  <div className="stat-header">Approval Rate</div>
+                  <div className="stat-number">
+                    {analytics.approvalRate !== null ? `${analytics.approvalRate}%` : 'N/A'}
+                  </div>
+                  <div className="stat-subtitle">
+                    {analytics.editRate !== null ? `${analytics.editRate}% AI Draft Edit Rate` : 'Posted vs Decided'}
+                  </div>
+                </div>
+
+                <div className="stat-card">
+                  <div className="stat-header">Auto-Post Adoption</div>
+                  <div className="stat-number">
+                    {analytics.autoPostAdoption
+                      ? `${analytics.autoPostAdoption.enabled} / ${analytics.autoPostAdoption.enabled + analytics.autoPostAdoption.disabled}`
+                      : '0 / 0'}
+                  </div>
+                  <div className="stat-subtitle">
+                    {analytics.autoPostAdoption && (analytics.autoPostAdoption.enabled + analytics.autoPostAdoption.disabled) > 0
+                      ? `${Math.round((analytics.autoPostAdoption.enabled / (analytics.autoPostAdoption.enabled + analytics.autoPostAdoption.disabled)) * 100)}% of Active Customers`
+                      : 'Active Customer Adoption'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Needs Attention Alert List */}
+              {hasNeedsAttention && (
+                <div className="attention-section">
+                  <h3 className="attention-title">
+                    <span>⚠️</span> Needs Attention & Founder Action
+                  </h3>
+                  <div className="attention-list">
+                    {analytics.staleOnboarding.map((item) => (
+                      <div key={item.id} className="attention-item">
+                        <span className="attention-tag stale">Stale Onboarding</span>
+                        <span>
+                          <strong>{item.name}</strong> ({item.packageName}) has been awaiting setup verification for <strong>{item.daysAwaiting} days</strong> ({item.email})
+                        </span>
+                      </div>
+                    ))}
+
+                    {analytics.inactiveCustomers.map((item) => (
+                      <div key={item.id} className="attention-item">
+                        <span className="attention-tag inactive">Inactivity Risk</span>
+                        <span>
+                          <strong>{item.name}</strong> ({item.packageName}) is Active but has <strong>0 posted reviews</strong> in the last 7 days ({item.email})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Per-Customer Breakdown Table */}
+              <div className="section-title" style={{ fontSize: '1.1rem', marginTop: '1rem' }}>
+                <span>Per-Customer Activity Breakdown</span>
+              </div>
+
+              {analytics.reviewsPerCustomer.length === 0 ? (
+                <div className="empty-state">
+                  <p>No customer activity data found.</p>
+                </div>
+              ) : (
+                <div className="table-container">
+                  <table className="analytics-table">
+                    <thead>
+                      <tr>
+                        <th>Customer Name</th>
+                        <th>Package Name</th>
+                        <th>Total Reviews</th>
+                        <th>Posted</th>
+                        <th>Pending</th>
+                        <th>Rejected</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.reviewsPerCustomer.map((cust) => (
+                        <tr key={cust.customerId}>
+                          <td style={{ fontWeight: 600 }}>{cust.customerName}</td>
+                          <td style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{cust.packageName}</td>
+                          <td style={{ fontWeight: 600 }}>{cust.totalReviews}</td>
+                          <td style={{ color: 'var(--mint)' }}>{cust.posted}</td>
+                          <td style={{ color: 'var(--gold)' }}>{cust.pending}</td>
+                          <td style={{ color: 'var(--text-muted)' }}>{cust.rejected}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </main>
       )}
 
-      {/* Tab 2: Customers & Auto-Post */}
+      {/* TAB 2: CUSTOMERS (READ-ONLY AUTO-POST BADGE + ADD CUSTOMER) */}
       {activeTab === 'customers' && (
         <main>
           <div className="section-title">
-            <span>Customer Settings & Auto-Post Configuration</span>
+            <span>Customer Directory & Credentials</span>
             <div className="header-actions">
               <button className="btn-add-customer" onClick={() => { setModalError(''); setShowAddModal(true); }}>
                 + Add Customer
@@ -423,8 +353,7 @@ export default function App() {
             </div>
           ) : (
             <div className="customers-list">
-              {customers.map(customer => {
-                const isToggling = togglingCustomers[customer.id];
+              {customers.map((customer) => {
                 const isEnabled = customer.autoPostEnabled;
                 const isAwaiting = customer.onboardingStatus === 'AWAITING_VERIFICATION';
 
@@ -442,20 +371,10 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="toggle-wrapper">
-                      <span className={`toggle-status ${isEnabled ? 'enabled' : 'disabled'}`}>
-                        {isEnabled ? 'Auto-Post Enabled' : 'Manual Approval'}
-                      </span>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={isEnabled}
-                          disabled={isToggling}
-                          onChange={() => handleToggleAutoPost(customer.id, isEnabled)}
-                        />
-                        <span className="slider"></span>
-                      </label>
-                    </div>
+                    {/* Read-Only Auto-Post Status Badge */}
+                    <span className={`badge-autopost ${isEnabled ? 'enabled' : 'disabled'}`}>
+                      Auto-Post: {isEnabled ? 'ON' : 'OFF'}
+                    </span>
                   </div>
                 );
               })}
