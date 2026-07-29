@@ -7,7 +7,7 @@ const fs = require('fs');
 // Replace this placeholder with your actual Android app package name.
 // ============================================================================
 const PACKAGE_NAME = "com.ford9.ai.coding.generator.code.creator.maker.writer.builder.assistant";
-const SERVICE_ACCOUNT_FILE = path.join(__dirname, 'service-account.json');
+const SERVICE_ACCOUNT_FILE = "/Users/macbookpro/Downloads/reviewforge-dev-cb7d6a2fde8b.json";
 
 async function testConnection() {
   console.log(`\n--- Google Play Developer API Connectivity Test ---`);
