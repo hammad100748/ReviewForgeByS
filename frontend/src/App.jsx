@@ -32,7 +32,9 @@ export default function App() {
     setLoadingAnalytics(true);
     setErrorBanner('');
     try {
-      const res = await fetch(`${API_BASE}/admin/analytics`);
+      const res = await fetch(`${API_BASE}/admin/analytics`, {
+        credentials: 'include',
+      });
       const json = await res.json();
       if (json.success) {
         setAnalytics(json.data);
@@ -51,7 +53,9 @@ export default function App() {
     setLoadingCustomers(true);
     setErrorBanner('');
     try {
-      const res = await fetch(`${API_BASE}/customers`);
+      const res = await fetch(`${API_BASE}/customers`, {
+        credentials: 'include',
+      });
       const json = await res.json();
       if (json.success) {
         setCustomers(json.data || []);
@@ -118,6 +122,7 @@ export default function App() {
 
       const res = await fetch(`${API_BASE}/customers/create`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newCustName.trim(),

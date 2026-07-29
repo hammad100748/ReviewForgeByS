@@ -37,6 +37,39 @@ router.get('/health', (req, res) => {
 // ============================================================================
 
 /**
+ * Middleware enforcing HTTP Basic Auth for Admin routes.
+ * Compares credentials against process.env.ADMIN_USERNAME and process.env.ADMIN_PASSWORD.
+ */
+function requireAdminBasicAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="ReviewForge Admin Dashboard"');
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized: Missing Admin Basic Auth header.',
+    });
+  }
+
+  const base64Credentials = authHeader.split('Basic ')[1];
+  const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
+  const [username, password] = credentials.split(':');
+
+  const expectedUsername = process.env.ADMIN_USERNAME || 'admin';
+  const expectedPassword = process.env.ADMIN_PASSWORD || 'admin';
+
+  if (username !== expectedUsername || password !== expectedPassword) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="ReviewForge Admin Dashboard"');
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized: Invalid admin credentials.',
+    });
+  }
+
+  next();
+}
+
+/**
  * Middleware to verify Firebase ID Token and enforce email pre-provisioning in Firestore.
  * Rejects with HTTP 403 if the authenticated email is not found in Firestore.
  */
@@ -90,8 +123,9 @@ async function verifyCustomerAuth(req, res, next) {
 /**
  * GET /api/admin/analytics
  * Returns aggregate metrics, performance ratios, and founder follow-up lists.
+ * Protected by HTTP Basic Auth.
  */
-router.get('/admin/analytics', async (req, res) => {
+router.get('/admin/analytics', requireAdminBasicAuth, async (req, res) => {
   try {
     const nowMs = Date.now();
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
@@ -492,14 +526,15 @@ router.post('/customer/reviews/:docId/reject', verifyCustomerAuth, async (req, r
 });
 
 // ============================================================================
-// ADMIN REVIEWS ENDPOINTS
+// ADMIN REVIEWS ENDPOINTS (PROTECTED BY HTTP BASIC AUTH)
 // ============================================================================
 
 /**
  * GET /api/reviews/pending
  * Returns all review documents currently in 'pending_approval' status.
+ * Protected by HTTP Basic Auth.
  */
-router.get('/reviews/pending', async (req, res) => {
+router.get('/reviews/pending', requireAdminBasicAuth, async (req, res) => {
   try {
     const reviews = await getPendingReviews();
     return res.status(200).json({
@@ -517,8 +552,9 @@ router.get('/reviews/pending', async (req, res) => {
 /**
  * POST /api/reviews/:docId/approve
  * Approves and posts the draft reply as-is to Google Play Store.
+ * Protected by HTTP Basic Auth.
  */
-router.post('/reviews/:docId/approve', async (req, res) => {
+router.post('/reviews/:docId/approve', requireAdminBasicAuth, async (req, res) => {
   const { docId } = req.params;
   try {
     const result = await postApprovedReply(docId);
@@ -538,9 +574,9 @@ router.post('/reviews/:docId/approve', async (req, res) => {
 /**
  * POST /api/reviews/:docId/edit-approve
  * Updates the draft reply with newText, then posts it to Google Play Store.
- * Payload: { "newText": "Thank you for your feedback!" }
+ * Protected by HTTP Basic Auth.
  */
-router.post('/reviews/:docId/edit-approve', async (req, res) => {
+router.post('/reviews/:docId/edit-approve', requireAdminBasicAuth, async (req, res) => {
   const { docId } = req.params;
   const { newText } = req.body || {};
 
@@ -582,8 +618,9 @@ router.post('/reviews/:docId/edit-approve', async (req, res) => {
 /**
  * POST /api/reviews/:docId/reject
  * Marks a review draft's status as "rejected".
+ * Protected by HTTP Basic Auth.
  */
-router.post('/reviews/:docId/reject', async (req, res) => {
+router.post('/reviews/:docId/reject', requireAdminBasicAuth, async (req, res) => {
   const { docId } = req.params;
   try {
     await updateReviewStatus(docId, 'rejected');
@@ -600,12 +637,13 @@ router.post('/reviews/:docId/reject', async (req, res) => {
 });
 
 // ============================================================================
-// ADMIN CUSTOMERS ENDPOINTS
+// ADMIN CUSTOMERS ENDPOINTS & PUBLIC CUSTOMER CHECK
 // ============================================================================
 
 /**
  * GET /api/customers/by-email?email=x@example.com
  * Looks up a customer record by email in Firestore for access control.
+ * Public endpoint used by customer-frontend before sign up / log in.
  * SECURITY: If not found, returns { success: true, exists: false } without leaking customer data.
  */
 router.get('/customers/by-email', async (req, res) => {
@@ -647,9 +685,10 @@ router.get('/customers/by-email', async (req, res) => {
 /**
  * GET /api/customers
  * Returns all active customers.
+ * Protected by HTTP Basic Auth.
  * SECURITY: Decrypted service account JSON credentials are NEVER returned in this response.
  */
-router.get('/customers', async (req, res) => {
+router.get('/customers', requireAdminBasicAuth, async (req, res) => {
   try {
     const customers = await getAllActiveCustomers();
 
@@ -671,9 +710,10 @@ router.get('/customers', async (req, res) => {
 /**
  * POST /api/customers/create
  * Creates a new customer record with encrypted service account credentials and AWAITING_VERIFICATION status.
+ * Protected by HTTP Basic Auth.
  * Payload: { "name": "...", "email": "...", "packageName": "...", "serviceAccountJson": { ... } }
  */
-router.post('/customers/create', async (req, res) => {
+router.post('/customers/create', requireAdminBasicAuth, async (req, res) => {
   const { name, email, packageName, serviceAccountJson } = req.body || {};
 
   // 1. Validate required fields
@@ -754,9 +794,10 @@ router.post('/customers/create', async (req, res) => {
 /**
  * POST /api/customers/:customerId/autopost
  * Toggles autoPostEnabled mode for a specific customer.
+ * Protected by HTTP Basic Auth.
  * Payload: { "enabled": true } or { "enabled": false }
  */
-router.post('/customers/:customerId/autopost', async (req, res) => {
+router.post('/customers/:customerId/autopost', requireAdminBasicAuth, async (req, res) => {
   const { customerId } = req.params;
   const { enabled } = req.body || {};
 

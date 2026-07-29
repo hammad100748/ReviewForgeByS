@@ -12,7 +12,13 @@ ReviewForge backend service for securely storing customer credentials, managing 
 > The following files contain sensitive secrets and are listed in `.gitignore`:
 > - `firebase-service-account.json` (Firebase Admin SDK credentials)
 > - `service-account.json` (Google Play Developer API test credentials)
-> - `.env` (Environment variables containing `ENCRYPTION_KEY` and `DEEPSEEK_API_KEY`)
+> - `.env` (Environment variables containing `ENCRYPTION_KEY`, `DEEPSEEK_API_KEY`, `ADMIN_USERNAME`, and `ADMIN_PASSWORD`)
+
+> [!IMPORTANT]
+> **Admin Dashboard Password Protection (HTTP Basic Auth)**:
+> The Admin Dashboard endpoints (`/api/admin/*`, `/api/customers/*`, `/api/reviews/*`) are protected by HTTP Basic Auth.
+> - Credentials are set via `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables.
+> - **Deployment Security Note**: This is a temporary, lightweight protection measure designed for a single founder/admin. In production (e.g. Render / Cloud Run), `ADMIN_USERNAME` and `ADMIN_PASSWORD` must be set as real secrets in your deployment dashboard and **NEVER** committed to Git.
 
 ---
 
@@ -36,6 +42,8 @@ Set the required environment variables in `.env`:
   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
   ```
 - `DEEPSEEK_API_KEY`: Your DeepSeek AI API key.
+- `ADMIN_USERNAME`: Admin login username (default: `admin`).
+- `ADMIN_PASSWORD`: Admin login password.
 
 ### 3. Firebase Admin SDK Setup
 Place your Firebase Admin SDK credential file in the project root named:
@@ -63,7 +71,15 @@ The server runs on `http://localhost:3001` (or your configured `PORT`) with CORS
 | :--- | :--- | :--- | :--- |
 | `GET` | `/health` | Public | Lightweight health check endpoint (`{ status: "ok" }`) |
 | `GET` | `/api/health` | Public | Alias public health check endpoint |
-| `GET` | `/api/admin/analytics` | Public | Founder Analytics (total customers, adoption rates, stale onboarding) |
+| `GET` | `/api/customers/by-email` | Public | Check if customer email is pre-provisioned in Firestore (`?email=...`) |
+| `GET` | `/api/admin/analytics` | HTTP Basic Auth | Founder Analytics (total customers, adoption rates, stale onboarding) |
+| `GET` | `/api/customers` | HTTP Basic Auth | Admin: List all active customers *(credentials stripped)* |
+| `POST` | `/api/customers/create` | HTTP Basic Auth | Admin: Pre-provision a new customer record |
+| `POST` | `/api/customers/:customerId/autopost` | HTTP Basic Auth | Admin: Toggle Auto-Post mode for a customer |
+| `GET` | `/api/reviews/pending` | HTTP Basic Auth | Admin: Fetch all pending reviews |
+| `POST` | `/api/reviews/:docId/approve` | HTTP Basic Auth | Admin: Approve & post draft reply |
+| `POST` | `/api/reviews/:docId/edit-approve` | HTTP Basic Auth | Admin: Edit & post draft reply |
+| `POST` | `/api/reviews/:docId/reject` | HTTP Basic Auth | Admin: Reject draft reply |
 | `GET` | `/api/customer/me` | Bearer Token | Fetch authenticated customer profile & service account email |
 | `POST` | `/api/customer/verify-connection` | Bearer Token | Perform live `reviews.list` check & update status to `"ACTIVE"` |
 | `POST` | `/api/customer/autopost` | Bearer Token | Self-serve toggle Auto-Post mode for logged-in customer |
@@ -71,14 +87,6 @@ The server runs on `http://localhost:3001` (or your configured `PORT`) with CORS
 | `POST` | `/api/customer/reviews/:docId/approve` | Bearer Token | Approve and post reply (with ownership verification) |
 | `POST` | `/api/customer/reviews/:docId/edit-approve` | Bearer Token | Edit and post reply (with ownership verification) |
 | `POST` | `/api/customer/reviews/:docId/reject` | Bearer Token | Reject review draft (with ownership verification) |
-| `GET` | `/api/reviews/pending` | Public | Admin: Fetch all pending reviews |
-| `POST` | `/api/reviews/:docId/approve` | Public | Admin: Approve & post draft reply |
-| `POST` | `/api/reviews/:docId/edit-approve` | Public | Admin: Edit & post draft reply |
-| `POST` | `/api/reviews/:docId/reject` | Public | Admin: Reject draft reply |
-| `GET` | `/api/customers/by-email` | Public | Check if customer email is pre-provisioned in Firestore (`?email=...`) |
-| `GET` | `/api/customers` | Public | Admin: List all active customers *(credentials stripped)* |
-| `POST` | `/api/customers/create` | Public | Admin: Pre-provision a new customer record |
-| `POST` | `/api/customers/:customerId/autopost` | Public | Admin: Toggle Auto-Post mode for a customer |
 
 ---
 
