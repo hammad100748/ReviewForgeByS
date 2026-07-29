@@ -4,6 +4,16 @@ const rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:300
 const API_BASE = `${rawApiBaseUrl.replace(/\/$/, '')}/api`;
 
 export default function App() {
+  // Memory-only Admin Auth Header ("Basic <base64>")
+  const [adminAuthHeader, setAdminAuthHeader] = useState('');
+
+  // Login Screen State
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState('');
+
+  // Active Navigation Tab
   const [activeTab, setActiveTab] = useState('analytics'); // 'analytics' | 'customers'
 
   // Analytics State
@@ -27,14 +37,80 @@ export default function App() {
   const [errorBanner, setErrorBanner] = useState('');
   const [successBanner, setSuccessBanner] = useState('');
 
+  // Centralized API Helper with HTTP Basic Auth Header Injection
+  const apiFetch = async (path, options = {}) => {
+    const headers = {
+      ...(options.headers || {}),
+      ...(adminAuthHeader ? { Authorization: adminAuthHeader } : {}),
+    };
+
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 401 && adminAuthHeader) {
+      // Force return to login screen if credentials become invalid
+      setAdminAuthHeader('');
+      setErrorBanner('Session expired or credentials rejected. Please log in again.');
+    }
+
+    return response;
+  };
+
+  // Submit Admin Login Form & Verify Credentials
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+
+    if (!username.trim() || !password) {
+      setLoginError('Please enter both username and password.');
+      return;
+    }
+
+    setLoggingIn(true);
+
+    try {
+      const authHeaderValue = `Basic ${btoa(`${username.trim()}:${password}`)}`;
+      const res = await fetch(`${API_BASE}/admin/analytics`, {
+        headers: {
+          Authorization: authHeaderValue,
+        },
+      });
+
+      if (res.status === 200) {
+        const json = await res.json();
+        setAdminAuthHeader(authHeaderValue);
+        setAnalytics(json.data);
+        setPassword('');
+      } else if (res.status === 401) {
+        setLoginError('Incorrect username or password. Please try again.');
+      } else {
+        const json = await res.json().catch(() => ({}));
+        setLoginError(json.error || `Server returned unexpected status ${res.status}`);
+      }
+    } catch (err) {
+      setLoginError(`Cannot connect to backend API (${rawApiBaseUrl}). Please verify the backend server is running.`);
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setAdminAuthHeader('');
+    setUsername('');
+    setPassword('');
+    setAnalytics(null);
+    setCustomers([]);
+  };
+
   // Fetch Founder Analytics Metrics
   const fetchAnalytics = async () => {
+    if (!adminAuthHeader) return;
     setLoadingAnalytics(true);
     setErrorBanner('');
     try {
-      const res = await fetch(`${API_BASE}/admin/analytics`, {
-        credentials: 'include',
-      });
+      const res = await apiFetch('/admin/analytics');
       const json = await res.json();
       if (json.success) {
         setAnalytics(json.data);
@@ -42,7 +118,7 @@ export default function App() {
         setErrorBanner(`Failed to load analytics: ${json.error}`);
       }
     } catch (err) {
-      setErrorBanner(`Cannot connect to ReviewForge backend API (${rawApiBaseUrl}). Please verify the backend server is running. (${err.message})`);
+      setErrorBanner(`Cannot connect to ReviewForge backend API (${rawApiBaseUrl}). (${err.message})`);
     } finally {
       setLoadingAnalytics(false);
     }
@@ -50,12 +126,11 @@ export default function App() {
 
   // Fetch Customers List
   const fetchCustomers = async () => {
+    if (!adminAuthHeader) return;
     setLoadingCustomers(true);
     setErrorBanner('');
     try {
-      const res = await fetch(`${API_BASE}/customers`, {
-        credentials: 'include',
-      });
+      const res = await apiFetch('/customers');
       const json = await res.json();
       if (json.success) {
         setCustomers(json.data || []);
@@ -63,19 +138,21 @@ export default function App() {
         setErrorBanner(`Failed to load customers: ${json.error}`);
       }
     } catch (err) {
-      setErrorBanner(`Cannot connect to ReviewForge backend API (${rawApiBaseUrl}). Please verify the backend server is running. (${err.message})`);
+      setErrorBanner(`Cannot connect to ReviewForge backend API (${rawApiBaseUrl}). (${err.message})`);
     } finally {
       setLoadingCustomers(false);
     }
   };
 
   useEffect(() => {
+    if (!adminAuthHeader) return;
+
     if (activeTab === 'analytics') {
       fetchAnalytics();
     } else if (activeTab === 'customers') {
       fetchCustomers();
     }
-  }, [activeTab]);
+  }, [activeTab, adminAuthHeader]);
 
   // Action: Create New Customer
   const handleCreateCustomer = async (e) => {
@@ -120,9 +197,8 @@ export default function App() {
         throw new Error('Service Account JSON is missing required fields (client_email, private_key).');
       }
 
-      const res = await fetch(`${API_BASE}/customers/create`, {
+      const res = await apiFetch('/customers/create', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newCustName.trim(),
@@ -152,6 +228,67 @@ export default function App() {
     }
   };
 
+  // ============================================================================
+  // UNAUTHENTICATED ADMIN LOGIN SCREEN
+  // ============================================================================
+  if (!adminAuthHeader) {
+    return (
+      <div className="app-container">
+        <div className="login-wrapper">
+          <div className="login-card">
+            <div className="login-header">
+              <div className="login-icon">⚡</div>
+              <h2 className="login-title">ReviewForge Admin</h2>
+              <p className="login-subtitle">Enter founder credentials to access dashboard</p>
+            </div>
+
+            {loginError && (
+              <div className="banner banner-error" style={{ marginBottom: '1.25rem' }}>
+                <span>⚠️ {loginError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleLogin} className="login-form">
+              <div className="form-group">
+                <label>Admin Username</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="admin"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  disabled={loggingIn}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Admin Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="••••••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loggingIn}
+                  required
+                />
+              </div>
+
+              <button type="submit" className="btn btn-primary" disabled={loggingIn} style={{ width: '100%', marginTop: '0.5rem', padding: '0.75rem' }}>
+                {loggingIn ? 'Verifying Credentials...' : 'Log In to Dashboard'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // AUTHENTICATED FOUNDER DASHBOARD
+  // ============================================================================
   const hasNeedsAttention = analytics && (
     (analytics.staleOnboarding && analytics.staleOnboarding.length > 0) ||
     (analytics.inactiveCustomers && analytics.inactiveCustomers.length > 0)
@@ -177,6 +314,9 @@ export default function App() {
             onClick={() => setActiveTab('customers')}
           >
             Customers
+          </button>
+          <button className="btn-logout" onClick={handleLogout} style={{ marginLeft: '0.5rem' }}>
+            Log Out
           </button>
         </nav>
       </header>
@@ -224,7 +364,7 @@ export default function App() {
                   <div className="stat-header">Total Customers</div>
                   <div className="stat-number">{analytics.totalCustomers}</div>
                   <div className="stat-subtitle">
-                    {analytics.customersByStatus.ACTIVE || 0} Active • {analytics.customersByStatus.AWAITING_VERIFICATION || 0} Awaiting
+                    {analytics.customersByStatus?.ACTIVE || 0} Active • {analytics.customersByStatus?.AWAITING_VERIFICATION || 0} Awaiting
                   </div>
                 </div>
 
@@ -232,7 +372,7 @@ export default function App() {
                   <div className="stat-header">Total Reviews Processed</div>
                   <div className="stat-number">{analytics.totalReviewsProcessed}</div>
                   <div className="stat-subtitle">
-                    {analytics.reviewsByStatus.posted || 0} Posted • {analytics.reviewsByStatus.rejected || 0} Rejected
+                    {analytics.reviewsByStatus?.posted || 0} Posted • {analytics.reviewsByStatus?.rejected || 0} Rejected
                   </div>
                 </div>
 
@@ -268,7 +408,7 @@ export default function App() {
                     <span>⚠️</span> Needs Attention & Founder Action
                   </h3>
                   <div className="attention-list">
-                    {analytics.staleOnboarding.map((item) => (
+                    {analytics.staleOnboarding?.map((item) => (
                       <div key={item.id} className="attention-item">
                         <span className="attention-tag stale">Stale Onboarding</span>
                         <span>
@@ -277,7 +417,7 @@ export default function App() {
                       </div>
                     ))}
 
-                    {analytics.inactiveCustomers.map((item) => (
+                    {analytics.inactiveCustomers?.map((item) => (
                       <div key={item.id} className="attention-item">
                         <span className="attention-tag inactive">Inactivity Risk</span>
                         <span>
@@ -294,7 +434,7 @@ export default function App() {
                 <span>Per-Customer Activity Breakdown</span>
               </div>
 
-              {analytics.reviewsPerCustomer.length === 0 ? (
+              {analytics.reviewsPerCustomer?.length === 0 ? (
                 <div className="empty-state">
                   <p>No customer activity data found.</p>
                 </div>
@@ -312,7 +452,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {analytics.reviewsPerCustomer.map((cust) => (
+                      {analytics.reviewsPerCustomer?.map((cust) => (
                         <tr key={cust.customerId}>
                           <td style={{ fontWeight: 600 }}>{cust.customerName}</td>
                           <td style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{cust.packageName}</td>
