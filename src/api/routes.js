@@ -4,6 +4,7 @@ const { db, admin } = require('../config/firebase');
 const {
   getPendingReviews,
   getPendingReviewsByCustomer,
+  getCustomerReviewHistory,
   getReviewById,
   updateReviewStatus,
 } = require('../models/review');
@@ -456,6 +457,63 @@ router.get('/customer/reviews/pending', verifyCustomerAuth, async (req, res) => 
     return res.status(500).json({
       success: false,
       error: `Failed to fetch customer reviews: ${error.message}`,
+    });
+  }
+});
+
+/**
+ * GET /api/customer/reviews/history
+ * Returns reviews with status 'posted' or 'rejected' strictly scoped to the logged-in customer.
+ * Sorted newest first.
+ */
+router.get('/customer/reviews/history', verifyCustomerAuth, async (req, res) => {
+  try {
+    const history = await getCustomerReviewHistory(req.customer.id);
+    return res.status(200).json({
+      success: true,
+      data: history,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch review history: ${error.message}`,
+    });
+  }
+});
+
+/**
+ * POST /api/customer/reviews/:docId/undo-reject
+ * Reverts a rejected review's status back to 'pending_approval' after ownership verification.
+ */
+router.post('/customer/reviews/:docId/undo-reject', verifyCustomerAuth, async (req, res) => {
+  const { docId } = req.params;
+
+  try {
+    const review = await getReviewById(docId);
+    if (!review) {
+      return res.status(404).json({ success: false, error: 'Review document not found.' });
+    }
+
+    if (review.customerId !== req.customer.id) {
+      return res.status(403).json({ success: false, error: 'Access denied: You do not own this review document.' });
+    }
+
+    if (review.status !== 'rejected') {
+      return res.status(400).json({
+        success: false,
+        error: 'Only rejected reviews can be moved back to pending approval.',
+      });
+    }
+
+    await updateReviewStatus(docId, 'pending_approval');
+    return res.status(200).json({
+      success: true,
+      message: `Review '${docId}' moved back to pending approval.`,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: `Failed to undo review rejection: ${error.message}`,
     });
   }
 });

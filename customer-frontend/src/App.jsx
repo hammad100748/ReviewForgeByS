@@ -19,6 +19,40 @@ function StarRating({ rating }) {
   return <span className="star-rating" title={`${numStars} out of 5 stars`}>{stars.join('')}</span>;
 }
 
+function TagBadge({ tag }) {
+  const safeTag = (tag || 'other').toLowerCase();
+  const labelMap = {
+    praise: 'Praise',
+    bug: 'Bug',
+    feature: 'Feature',
+    other: 'Other',
+  };
+  return (
+    <span className={`tag-badge tag-${safeTag}`}>
+      {labelMap[safeTag] || 'Other'}
+    </span>
+  );
+}
+
+function formatRelativeTime(dateInput) {
+  if (!dateInput) return '';
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return '';
+
+  const now = new Date();
+  const diffSeconds = Math.floor((now - date) / 1000);
+
+  if (diffSeconds < 60) return 'just now';
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  return `${diffMonths}mo ago`;
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -50,6 +84,9 @@ export default function App() {
   // Auto-Post Toggle State
   const [togglingAutoPost, setTogglingAutoPost] = useState(false);
 
+  // Tab State ('PENDING' | 'HISTORY')
+  const [activeTab, setActiveTab] = useState('PENDING');
+
   // Customer Dashboard Reviews State
   const [reviews, setReviews] = useState([]);
   const [editedTexts, setEditedTexts] = useState({});
@@ -57,6 +94,11 @@ export default function App() {
   const [processingDocs, setProcessingDocs] = useState({});
   const [dashboardError, setDashboardError] = useState('');
   const [dashboardSuccess, setDashboardSuccess] = useState('');
+
+  // History Reviews State
+  const [historyReviews, setHistoryReviews] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [undoingDocs, setUndoingDocs] = useState({});
 
   // Scalable Pending Reviews UI State (Filter, Sort, Accordion, Pagination, Bulk)
   const [filterBucket, setFilterBucket] = useState('ALL'); // 'ALL' | '1-2' | '3' | '4-5'
@@ -76,6 +118,7 @@ export default function App() {
       } else {
         setCustomerProfile(null);
         setReviews([]);
+        setHistoryReviews([]);
       }
     });
     return () => unsubscribe();
@@ -98,6 +141,7 @@ export default function App() {
         setCustomerProfile(json.data);
         if (json.data.onboardingStatus === 'ACTIVE') {
           fetchCustomerReviews(user);
+          fetchCustomerHistory(user);
         }
       } else {
         setProfileError(json.error || 'Failed to load customer profile.');
@@ -140,7 +184,59 @@ export default function App() {
     }
   };
 
-  // Customer Toggle Auto-Post Mode Handler (With Auto-Bulk Posting when Turning ON)
+  // Fetch Customer-Scoped Review History (Posted & Rejected)
+  const fetchCustomerHistory = async (user = currentUser) => {
+    if (!user) return;
+    setLoadingHistory(true);
+    setDashboardError('');
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`${API_BASE}/customer/reviews/history`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const json = await res.json();
+      if (json.success) {
+        setHistoryReviews(json.data || []);
+      } else {
+        setDashboardError(`Failed to load review history: ${json.error}`);
+      }
+    } catch (err) {
+      setDashboardError(`Cannot fetch history: ${err.message}`);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  // Customer Action: Undo Rejection
+  const handleUndoReject = async (docId) => {
+    if (!currentUser) return;
+    setUndoingDocs(prev => ({ ...prev, [docId]: true }));
+    setDashboardError('');
+    setDashboardSuccess('');
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch(`${API_BASE}/customer/reviews/${docId}/undo-reject`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (json.success) {
+        setHistoryReviews(prev => prev.filter(r => r.id !== docId));
+        fetchCustomerReviews(currentUser);
+        setDashboardSuccess('Moved back to pending — check your Pending queue');
+      } else {
+        setDashboardError(`Failed to undo rejection: ${json.error}`);
+      }
+    } catch (err) {
+      setDashboardError(`API error during undo: ${err.message}`);
+    } finally {
+      setUndoingDocs(prev => ({ ...prev, [docId]: false }));
+    }
+  };
+
+  // Customer Toggle Auto-Post Mode Handler
   const handleToggleAutoPost = async () => {
     if (!currentUser || !customerProfile) return;
 
@@ -176,6 +272,7 @@ export default function App() {
             const bulkJson = await bulkRes.json();
             if (bulkJson.success) {
               await fetchCustomerReviews(currentUser);
+              await fetchCustomerHistory(currentUser);
               if (bulkJson.postedCount > 0) {
                 setDashboardSuccess(`Auto-post enabled — ${bulkJson.postedCount} pending review(s) posted to Google Play.`);
               } else {
@@ -220,6 +317,7 @@ export default function App() {
       if (json.success) {
         setCustomerProfile(prev => prev ? { ...prev, onboardingStatus: 'ACTIVE' } : prev);
         fetchCustomerReviews(currentUser);
+        fetchCustomerHistory(currentUser);
       } else {
         setVerifyingError(json.error || "Unable to verify Play Console permission. Please confirm the service account email has been added with 'Reply to reviews' permission.");
       }
@@ -238,7 +336,7 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Single Merged Customer Action: Approve & Post Reply (Always sends current textarea contents)
+  // Single Merged Customer Action: Approve & Post Reply
   const handleApprove = async (docId) => {
     if (!currentUser) return;
     const currentText = editedTexts[docId] ?? '';
@@ -273,6 +371,7 @@ export default function App() {
       if (json.success) {
         setReviews(prev => prev.filter(r => r.id !== docId));
         if (expandedDocId === docId) setExpandedDocId(null);
+        fetchCustomerHistory(currentUser);
         setDashboardSuccess('Reply posted to Google Play Store!');
       } else {
         setDashboardError(`Failed to post reply: ${json.error}`);
@@ -300,7 +399,8 @@ export default function App() {
       if (json.success) {
         setReviews(prev => prev.filter(r => r.id !== docId));
         if (expandedDocId === docId) setExpandedDocId(null);
-        setDashboardSuccess(`Review draft rejected and removed from pending queue.`);
+        fetchCustomerHistory(currentUser);
+        setDashboardSuccess(`Review draft rejected and moved to Sent History.`);
       } else {
         setDashboardError(`Failed to reject review: ${json.error}`);
       }
@@ -494,6 +594,7 @@ export default function App() {
     if (postedIds.length > 0) {
       setReviews(prev => prev.filter(r => !postedIds.includes(r.id)));
       if (postedIds.includes(expandedDocId)) setExpandedDocId(null);
+      fetchCustomerHistory(currentUser);
       setDashboardSuccess(`${successCount} replies posted successfully to Google Play Store!`);
     } else {
       setDashboardError(`Bulk approval process finished, but 0 replies were posted.`);
@@ -609,7 +710,7 @@ export default function App() {
               </button>
             </div>
           ) : isActive ? (
-            /* STATE B: ACTIVE (Scalable Pending Reviews Dashboard) */
+            /* STATE B: ACTIVE (Scalable Reviews Dashboard with Sent/History Tab & Auto-Tagging) */
             <div style={{ width: '100%' }}>
 
               {/* Self-Serve Auto-Post Toggle Control Box */}
@@ -667,13 +768,25 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Pending Reviews Section Header */}
-              <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h3 style={{ fontSize: '18px' }}>
-                  Pending Review Approvals ({reviews.length})
-                </h3>
-                <button className="btn-ghost" onClick={() => fetchCustomerReviews(currentUser)} disabled={loadingReviews || bulkProcessing} style={{ padding: '6px 12px', fontSize: '13px' }}>
-                  {loadingReviews ? 'Refreshing...' : '↻ Refresh Queue'}
+              {/* REQUIREMENT 8: MAIN DASHBOARD TABS NAVIGATION */}
+              <div className="dashboard-tabs">
+                <button
+                  className={`dashboard-tab-btn ${activeTab === 'PENDING' ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveTab('PENDING');
+                    fetchCustomerReviews(currentUser);
+                  }}
+                >
+                  Pending Queue ({reviews.length})
+                </button>
+                <button
+                  className={`dashboard-tab-btn ${activeTab === 'HISTORY' ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveTab('HISTORY');
+                    fetchCustomerHistory(currentUser);
+                  }}
+                >
+                  Sent History ({historyReviews.length})
                 </button>
               </div>
 
@@ -689,213 +802,333 @@ export default function App() {
                 </div>
               )}
 
-              {/* SUMMARY BAR & BULK APPROVE ACTION */}
-              {reviews.length > 0 && (
-                <div className="pending-summary-bar">
-                  <div className="summary-left">
-                    <span className="summary-total">{totalPending} Pending</span>
-                    <span style={{ color: 'var(--line)' }}>•</span>
-                    <div className="summary-breakdown">
-                      <span className="summary-chip">{lowCount} are 1-2★</span>
-                      <span className="summary-chip">{midCount} are 3★</span>
-                      <span className="summary-chip">{highCount} are 4-5★</span>
-                    </div>
-                  </div>
-
-                  {/* BULK APPROVE FOR UNEDITED POSITIVE REVIEWS */}
-                  {qualifyingBulkReviews.length > 0 && (
-                    <button
-                      className="btn-bulk-approve"
-                      onClick={() => setShowBulkModal(true)}
-                      disabled={bulkProcessing}
-                    >
-                      ⚡ Approve All Unedited 4-5★ ({qualifyingBulkReviews.length})
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* FILTER CHIPS & SORT CONTROLS */}
-              {reviews.length > 0 && (
-                <div className="pending-controls-bar">
-                  <div className="filter-chips">
-                    <button
-                      className={`chip-btn ${filterBucket === 'ALL' ? 'active' : ''}`}
-                      onClick={() => { setFilterBucket('ALL'); setVisibleLimit(15); }}
-                    >
-                      All ({totalCount})
-                    </button>
-                    <button
-                      className={`chip-btn ${filterBucket === '1-2' ? 'active' : ''}`}
-                      onClick={() => { setFilterBucket('1-2'); setVisibleLimit(15); }}
-                    >
-                      1-2★ ({lowCount})
-                    </button>
-                    <button
-                      className={`chip-btn ${filterBucket === '3' ? 'active' : ''}`}
-                      onClick={() => { setFilterBucket('3'); setVisibleLimit(15); }}
-                    >
-                      3★ ({midCount})
-                    </button>
-                    <button
-                      className={`chip-btn ${filterBucket === '4-5' ? 'active' : ''}`}
-                      onClick={() => { setFilterBucket('4-5'); setVisibleLimit(15); }}
-                    >
-                      4-5★ ({highCount})
+              {/* ============================================================ */}
+              {/* TAB 1: PENDING QUEUE VIEW */}
+              {/* ============================================================ */}
+              {activeTab === 'PENDING' && (
+                <div>
+                  {/* Pending Reviews Section Header */}
+                  <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h3 style={{ fontSize: '18px' }}>
+                      Pending Review Approvals ({reviews.length})
+                    </h3>
+                    <button className="btn-ghost" onClick={() => fetchCustomerReviews(currentUser)} disabled={loadingReviews || bulkProcessing} style={{ padding: '6px 12px', fontSize: '13px' }}>
+                      {loadingReviews ? 'Refreshing...' : '↻ Refresh Queue'}
                     </button>
                   </div>
 
-                  <div className="sort-group">
-                    <label>Sort by:</label>
-                    <select
-                      className="sort-select"
-                      value={sortBy}
-                      onChange={(e) => { setSortBy(e.target.value); setVisibleLimit(15); }}
-                    >
-                      <option value="RATING_LOW">Lowest Rating First</option>
-                      <option value="RATING_HIGH">Highest Rating First</option>
-                      <option value="NEWEST">Newest First</option>
-                      <option value="OLDEST">Oldest First</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Reviews List / Empty Queue State */}
-              {loadingReviews ? (
-                <div className="dashboard-card" style={{ textAlign: 'center' }}>
-                  <p className="mono" style={{ color: 'var(--text-muted)' }}>Loading pending reviews...</p>
-                </div>
-              ) : reviews.length === 0 ? (
-                <div className="dashboard-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
-                  <div style={{ fontSize: '36px', marginBottom: '12px' }}>🎉</div>
-                  <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>All caught up!</h3>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '14.5px' }}>
-                    No reviews are currently awaiting approval for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong>.
-                  </p>
-                </div>
-              ) : sortedReviews.length === 0 ? (
-                <div className="dashboard-card" style={{ textAlign: 'center', padding: '36px 24px' }}>
-                  <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>No reviews match filter</h3>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
-                    Try selecting a different star rating filter above.
-                  </p>
-                </div>
-              ) : (
-                <div className="reviews-grid" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {visibleReviews.map((review) => {
-                    const isExpanded = expandedDocId === review.id;
-                    const isProcessing = processingDocs[review.id];
-                    const currentText = editedTexts[review.id] ?? (review.draftReply || '');
-                    const charCount = currentText.length;
-                    const isOverLimit = charCount > 350;
-
-                    // Check if edited in current session
-                    const isEditedInSession = typeof editedTexts[review.id] === 'string' &&
-                      editedTexts[review.id].trim() !== (review.draftReply || '').trim();
-
-                    return (
-                      <div key={review.id} style={{ display: 'flex', flexDirection: 'column' }}>
-                        {/* COLLAPSED ROW VIEW */}
-                        <div
-                          className={`collapsed-row ${isExpanded ? 'expanded-active' : ''}`}
-                          onClick={() => setExpandedDocId(isExpanded ? null : review.id)}
-                        >
-                          <div className="collapsed-left">
-                            <StarRating rating={review.starRating} />
-                            <span className="collapsed-author">{review.authorName || 'Anonymous'}</span>
-                            <span className="collapsed-snippet">"{review.reviewText}"</span>
-                          </div>
-
-                          <div className="collapsed-right">
-                            {isEditedInSession && <span className="badge-edited">Edited</span>}
-                            <span className="chevron-icon">{isExpanded ? '▲' : '▼'}</span>
-                          </div>
+                  {/* SUMMARY BAR & BULK APPROVE ACTION */}
+                  {reviews.length > 0 && (
+                    <div className="pending-summary-bar">
+                      <div className="summary-left">
+                        <span className="summary-total">{totalPending} Pending</span>
+                        <span style={{ color: 'var(--line)' }}>•</span>
+                        <div className="summary-breakdown">
+                          <span className="summary-chip">{lowCount} are 1-2★</span>
+                          <span className="summary-chip">{midCount} are 3★</span>
+                          <span className="summary-chip">{highCount} are 4-5★</span>
                         </div>
+                      </div>
 
-                        {/* EXPANDED CARD VIEW (ACCORDION) */}
-                        {isExpanded && (
-                          <div className="expanded-card-wrap">
-                            <div className="review-card">
-                              {/* Review Author & Rating Bar */}
-                              <div className="review-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                <div>
-                                  <strong style={{ fontSize: '15px' }}>{review.authorName || 'Anonymous User'}</strong>
-                                  <div style={{ fontSize: '13px', color: 'var(--gold)', marginTop: '2px' }}>
-                                    <StarRating rating={review.starRating} /> ({review.starRating} / 5 stars)
-                                  </div>
-                                </div>
-                                <span className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                                  ID: {review.id}
-                                </span>
+                      {/* BULK APPROVE FOR UNEDITED POSITIVE REVIEWS */}
+                      {qualifyingBulkReviews.length > 0 && (
+                        <button
+                          className="btn-bulk-approve"
+                          onClick={() => setShowBulkModal(true)}
+                          disabled={bulkProcessing}
+                        >
+                          ⚡ Approve All Unedited 4-5★ ({qualifyingBulkReviews.length})
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* FILTER CHIPS & SORT CONTROLS */}
+                  {reviews.length > 0 && (
+                    <div className="pending-controls-bar">
+                      <div className="filter-chips">
+                        <button
+                          className={`chip-btn ${filterBucket === 'ALL' ? 'active' : ''}`}
+                          onClick={() => { setFilterBucket('ALL'); setVisibleLimit(15); }}
+                        >
+                          All ({totalCount})
+                        </button>
+                        <button
+                          className={`chip-btn ${filterBucket === '1-2' ? 'active' : ''}`}
+                          onClick={() => { setFilterBucket('1-2'); setVisibleLimit(15); }}
+                        >
+                          1-2★ ({lowCount})
+                        </button>
+                        <button
+                          className={`chip-btn ${filterBucket === '3' ? 'active' : ''}`}
+                          onClick={() => { setFilterBucket('3'); setVisibleLimit(15); }}
+                        >
+                          3★ ({midCount})
+                        </button>
+                        <button
+                          className={`chip-btn ${filterBucket === '4-5' ? 'active' : ''}`}
+                          onClick={() => { setFilterBucket('4-5'); setVisibleLimit(15); }}
+                        >
+                          4-5★ ({highCount})
+                        </button>
+                      </div>
+
+                      <div className="sort-group">
+                        <label>Sort by:</label>
+                        <select
+                          className="sort-select"
+                          value={sortBy}
+                          onChange={(e) => { setSortBy(e.target.value); setVisibleLimit(15); }}
+                        >
+                          <option value="RATING_LOW">Lowest Rating First</option>
+                          <option value="RATING_HIGH">Highest Rating First</option>
+                          <option value="NEWEST">Newest First</option>
+                          <option value="OLDEST">Oldest First</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Reviews List / Empty Queue State */}
+                  {loadingReviews ? (
+                    <div className="dashboard-card" style={{ textAlign: 'center' }}>
+                      <p className="mono" style={{ color: 'var(--text-muted)' }}>Loading pending reviews...</p>
+                    </div>
+                  ) : reviews.length === 0 ? (
+                    <div className="dashboard-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+                      <div style={{ fontSize: '36px', marginBottom: '12px' }}>🎉</div>
+                      <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>All caught up!</h3>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '14.5px' }}>
+                        No reviews are currently awaiting approval for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong>.
+                      </p>
+                    </div>
+                  ) : sortedReviews.length === 0 ? (
+                    <div className="dashboard-card" style={{ textAlign: 'center', padding: '36px 24px' }}>
+                      <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>No reviews match filter</h3>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
+                        Try selecting a different star rating filter above.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="reviews-grid" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {visibleReviews.map((review) => {
+                        const isExpanded = expandedDocId === review.id;
+                        const isProcessing = processingDocs[review.id];
+                        const currentText = editedTexts[review.id] ?? (review.draftReply || '');
+                        const charCount = currentText.length;
+                        const isOverLimit = charCount > 350;
+
+                        // Check if edited in current session
+                        const isEditedInSession = typeof editedTexts[review.id] === 'string' &&
+                          editedTexts[review.id].trim() !== (review.draftReply || '').trim();
+
+                        return (
+                          <div key={review.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                            {/* COLLAPSED ROW VIEW WITH TAG BADGE */}
+                            <div
+                              className={`collapsed-row ${isExpanded ? 'expanded-active' : ''}`}
+                              onClick={() => setExpandedDocId(isExpanded ? null : review.id)}
+                            >
+                              <div className="collapsed-left">
+                                <StarRating rating={review.starRating} />
+                                <TagBadge tag={review.tag} />
+                                <span className="collapsed-author">{review.authorName || 'Anonymous'}</span>
+                                <span className="collapsed-snippet">"{review.reviewText}"</span>
                               </div>
 
-                              {/* Customer Review Text */}
-                              <div className="review-body" style={{ background: 'var(--bg-panel-2)', padding: '14px', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '16px', fontSize: '14px', lineHeight: '1.6' }}>
-                                "{review.reviewText}"
-                              </div>
-
-                              {/* Editable AI Draft Reply Box */}
-                              <div className="form-group" style={{ marginBottom: '16px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                                  <label style={{ fontSize: '12.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                    AI Draft Reply (Editable)
-                                  </label>
-                                  <span className="mono" style={{ fontSize: '12px', color: isOverLimit ? 'var(--red)' : 'var(--text-muted)' }}>
-                                    {charCount} / 350 max characters
-                                  </span>
-                                </div>
-                                <textarea
-                                  className="form-textarea"
-                                  value={currentText}
-                                  onChange={(e) => setEditedTexts({ ...editedTexts, [review.id]: e.target.value })}
-                                  disabled={isProcessing}
-                                  rows={3}
-                                  style={{
-                                    borderColor: isOverLimit ? 'var(--red)' : undefined,
-                                  }}
-                                />
-                              </div>
-
-                              {/* Action Buttons Toolbar (SINGLE UNIFIED "Approve & Post" + "Reject") */}
-                              <div className="review-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                                <button
-                                  className="btn btn-approve"
-                                  onClick={() => handleApprove(review.id)}
-                                  disabled={isProcessing || isOverLimit}
-                                >
-                                  {isProcessing ? 'Posting...' : '✓ Approve & Post'}
-                                </button>
-
-                                <button
-                                  className="btn btn-reject"
-                                  onClick={() => handleReject(review.id)}
-                                  disabled={isProcessing}
-                                >
-                                  {isProcessing ? 'Rejecting...' : '✕ Reject'}
-                                </button>
+                              <div className="collapsed-right">
+                                {isEditedInSession && <span className="badge-edited">Edited</span>}
+                                <span className="chevron-icon">{isExpanded ? '▲' : '▼'}</span>
                               </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
 
-                  {/* PAGINATION / LOAD MORE BUTTON */}
-                  {sortedReviews.length > visibleLimit && (
-                    <div className="load-more-container">
-                      <button
-                        className="btn-ghost"
-                        onClick={() => setVisibleLimit(prev => prev + 15)}
-                        style={{ padding: '10px 24px', fontSize: '14px' }}
-                      >
-                        Load More ({sortedReviews.length - visibleLimit} remaining)
-                      </button>
+                            {/* EXPANDED CARD VIEW (ACCORDION) WITH TAG BADGE */}
+                            {isExpanded && (
+                              <div className="expanded-card-wrap">
+                                <div className="review-card">
+                                  {/* Review Author & Rating Bar */}
+                                  <div className="review-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                    <div>
+                                      <strong style={{ fontSize: '15px' }}>{review.authorName || 'Anonymous User'}</strong>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--gold)', marginTop: '4px' }}>
+                                        <StarRating rating={review.starRating} />
+                                        <TagBadge tag={review.tag} />
+                                        <span style={{ color: 'var(--text-muted)' }}>({review.starRating} / 5 stars)</span>
+                                      </div>
+                                    </div>
+                                    <span className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                      ID: {review.id}
+                                    </span>
+                                  </div>
+
+                                  {/* Customer Review Text */}
+                                  <div className="review-body" style={{ background: 'var(--bg-panel-2)', padding: '14px', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '16px', fontSize: '14px', lineHeight: '1.6' }}>
+                                    "{review.reviewText}"
+                                  </div>
+
+                                  {/* Editable AI Draft Reply Box */}
+                                  <div className="form-group" style={{ marginBottom: '16px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                      <label style={{ fontSize: '12.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                        AI Draft Reply (Editable)
+                                      </label>
+                                      <span className="mono" style={{ fontSize: '12px', color: isOverLimit ? 'var(--red)' : 'var(--text-muted)' }}>
+                                        {charCount} / 350 max characters
+                                      </span>
+                                    </div>
+                                    <textarea
+                                      className="form-textarea"
+                                      value={currentText}
+                                      onChange={(e) => setEditedTexts({ ...editedTexts, [review.id]: e.target.value })}
+                                      disabled={isProcessing}
+                                      rows={3}
+                                      style={{
+                                        borderColor: isOverLimit ? 'var(--red)' : undefined,
+                                      }}
+                                    />
+                                  </div>
+
+                                  {/* Action Buttons Toolbar */}
+                                  <div className="review-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                    <button
+                                      className="btn btn-approve"
+                                      onClick={() => handleApprove(review.id)}
+                                      disabled={isProcessing || isOverLimit}
+                                    >
+                                      {isProcessing ? 'Posting...' : '✓ Approve & Post'}
+                                    </button>
+
+                                    <button
+                                      className="btn btn-reject"
+                                      onClick={() => handleReject(review.id)}
+                                      disabled={isProcessing}
+                                    >
+                                      {isProcessing ? 'Rejecting...' : '✕ Reject'}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* PAGINATION / LOAD MORE BUTTON */}
+                      {sortedReviews.length > visibleLimit && (
+                        <div className="load-more-container">
+                          <button
+                            className="btn-ghost"
+                            onClick={() => setVisibleLimit(prev => prev + 15)}
+                            style={{ padding: '10px 24px', fontSize: '14px' }}
+                          >
+                            Load More ({sortedReviews.length - visibleLimit} remaining)
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               )}
+
+              {/* ============================================================ */}
+              {/* TAB 2: SENT / HISTORY VIEW */}
+              {/* ============================================================ */}
+              {activeTab === 'HISTORY' && (
+                <div>
+                  <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h3 style={{ fontSize: '18px' }}>
+                      Sent & Decision History ({historyReviews.length})
+                    </h3>
+                    <button className="btn-ghost" onClick={() => fetchCustomerHistory(currentUser)} disabled={loadingHistory} style={{ padding: '6px 12px', fontSize: '13px' }}>
+                      {loadingHistory ? 'Refreshing...' : '↻ Refresh History'}
+                    </button>
+                  </div>
+
+                  {loadingHistory ? (
+                    <div className="dashboard-card" style={{ textAlign: 'center' }}>
+                      <p className="mono" style={{ color: 'var(--text-muted)' }}>Loading history...</p>
+                    </div>
+                  ) : historyReviews.length === 0 ? (
+                    <div className="dashboard-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+                      <div style={{ fontSize: '36px', marginBottom: '12px' }}>📜</div>
+                      <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>No review history yet</h3>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '14.5px' }}>
+                        Posted or rejected reviews for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong> will appear here.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="reviews-grid" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {historyReviews.map((item) => {
+                        const isPosted = item.status === 'posted';
+                        const isRejected = item.status === 'rejected';
+                        const isUndoing = undoingDocs[item.id];
+
+                        const eventDate = item.postedAt || item.updatedAt || item.createdAt;
+                        const relativeTimeStr = formatRelativeTime(eventDate);
+                        const timeLabel = isPosted
+                          ? `posted ${relativeTimeStr}`
+                          : `rejected ${relativeTimeStr}`;
+
+                        return (
+                          <div key={item.id} className="review-card" style={{ background: 'var(--bg-panel)' }}>
+                            {/* Header */}
+                            <div className="review-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                              <div>
+                                <strong style={{ fontSize: '15px' }}>{item.authorName || 'Anonymous User'}</strong>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                                  <StarRating rating={item.starRating} />
+                                  <TagBadge tag={item.tag} />
+                                  <span style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                                    {timeLabel}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <span className={`status-chip ${isPosted ? 'active' : 'awaiting'}`} style={{ borderColor: isRejected ? 'rgba(168, 68, 43, 0.4)' : undefined, color: isRejected ? '#f7a390' : undefined, background: isRejected ? 'rgba(168, 68, 43, 0.15)' : undefined }}>
+                                {isPosted ? 'POSTED' : 'REJECTED'}
+                              </span>
+                            </div>
+
+                            {/* User Review Text */}
+                            <div className="review-body" style={{ background: 'var(--bg-panel-2)', padding: '14px', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '16px', fontSize: '14px', lineHeight: '1.6' }}>
+                              "{item.reviewText}"
+                            </div>
+
+                            {/* Posted Reply vs Rejected Action Bar */}
+                            {isPosted && (
+                              <div style={{ background: 'rgba(95, 203, 155, 0.06)', border: '1px solid rgba(95, 203, 155, 0.25)', borderRadius: '6px', padding: '12px 14px' }}>
+                                <label style={{ fontSize: '11.5px', color: 'var(--mint)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                                  ✓ Posted Developer Reply
+                                </label>
+                                <p style={{ fontSize: '13.5px', color: 'var(--text)', margin: 0, lineHeight: '1.5' }}>
+                                  "{item.draftReply}"
+                                </p>
+                              </div>
+                            )}
+
+                            {isRejected && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(168, 68, 43, 0.08)', border: '1px solid rgba(168, 68, 43, 0.25)', borderRadius: '6px', padding: '12px 14px' }}>
+                                <span style={{ fontSize: '13.5px', color: '#f7a390' }}>
+                                  ✕ Review draft was rejected
+                                </span>
+                                <button
+                                  className="btn-ghost"
+                                  onClick={() => handleUndoReject(item.id)}
+                                  disabled={isUndoing}
+                                  style={{ padding: '6px 14px', fontSize: '13px', borderColor: 'var(--gold)', color: 'var(--gold)' }}
+                                >
+                                  {isUndoing ? 'Undoing...' : '↩ Undo Rejection'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
             </div>
           ) : (
             /* FALLBACK / UNKNOWN STATUS */

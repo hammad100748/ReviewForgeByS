@@ -94,15 +94,19 @@ async function runDetectionCycle() {
           console.log(`    Author: ${authorName}`);
           console.log(`    Text: "${reviewText}"`);
 
-          // Generate AI draft reply using DeepSeek
-          console.log(`    Generating AI draft reply via DeepSeek...`);
+          // Generate AI draft reply & auto-tag using DeepSeek in a single call
+          console.log(`    Generating AI draft reply and auto-tag via DeepSeek...`);
           let draftReply = '';
+          let tag = 'other';
           try {
-            draftReply = await generateReply(reviewText, starRating);
-            console.log(`    Generated Draft (${draftReply.length} chars): "${draftReply}"`);
+            const aiResult = await generateReply(reviewText, starRating);
+            draftReply = aiResult.replyText;
+            tag = aiResult.tag;
+            console.log(`    Generated Tag: [${tag.toUpperCase()}], Draft (${draftReply.length} chars): "${draftReply}"`);
           } catch (aiError) {
             console.error(`    [AI GENERATION ERROR] ${aiError.message}`);
             draftReply = 'Could not generate AI draft reply.';
+            tag = 'other';
           }
 
           let isAutoPosted = false;
@@ -133,10 +137,11 @@ async function runDetectionCycle() {
                 starRating,
                 reviewText,
                 draftReply,
+                tag,
                 status: 'posted',
               });
 
-              console.log(`    Saved review to Firestore with status 'posted'.\n`);
+              console.log(`    Saved review to Firestore with status 'posted' and tag '${tag}'.\n`);
             } catch (postError) {
               console.error(`    [AUTO-POST FAILURE] Failed to post reply to Google Play: ${postError.message}`);
               console.error(`    Falling back to saving review as 'pending_approval'.\n`);
@@ -156,10 +161,11 @@ async function runDetectionCycle() {
               starRating,
               reviewText,
               draftReply,
+              tag,
               status: 'pending_approval',
             });
 
-            console.log(`    Saved review draft to Firestore (status: pending_approval).\n`);
+            console.log(`    Saved review draft to Firestore (status: pending_approval, tag: ${tag}).\n`);
           }
         }
 
@@ -176,14 +182,14 @@ async function runDetectionCycle() {
   }
 
   console.log(`======================================================`);
-  console.log(`                  CYCLE SUMMARY RESULTS               `);
+  console.log(`               Detection Cycle Complete               `);
   console.log(`======================================================`);
-  console.log(` Customers Processed:                 ${totalCustomersProcessed}`);
-  console.log(` New Reviews Found:                   ${totalNewReviewsFound}`);
-  console.log(` Skipped (already replied):           ${totalSkippedAlreadyReplied}`);
-  console.log(` Auto-Posted (Direct to Google Play): ${totalAutoPosted}`);
-  console.log(` AI Drafts Generated (Pending):       ${totalDraftsGenerated}`);
-  console.log(` Customer Errors:                     ${totalCustomerErrors}`);
+  console.log(`Customers Processed: ${totalCustomersProcessed}`);
+  console.log(`New Reviews Found:   ${totalNewReviewsFound}`);
+  console.log(`Skipped (Replied):   ${totalSkippedAlreadyReplied}`);
+  console.log(`Auto-Posted:         ${totalAutoPosted}`);
+  console.log(`Pending Drafts:      ${totalDraftsGenerated}`);
+  console.log(`Customer Errors:     ${totalCustomerErrors}`);
   console.log(`======================================================\n`);
 }
 

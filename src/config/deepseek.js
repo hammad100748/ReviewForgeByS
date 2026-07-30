@@ -7,10 +7,10 @@
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 
 /**
- * Generates an AI draft reply to a Google Play Store user review using DeepSeek.
+ * Generates an AI draft reply and classifies a review tag in a single DeepSeek API call.
  * @param {string} reviewText The content of the user review
  * @param {number} starRating Star rating (1 to 5)
- * @returns {Promise<string>} Generated draft reply (under 350 characters)
+ * @returns {Promise<{ replyText: string, tag: string }>} Object containing replyText and tag ("praise" | "bug" | "feature" | "other")
  */
 async function generateReply(reviewText, starRating) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -28,8 +28,17 @@ Guidelines:
    - For 4 or 5 stars: Be warm, enthusiastic, and appreciative.
 3. Reference specific feedback points mentioned by the user if present.
 4. Thank the user for their review.
-5. NEVER use generic canned phrases like "we value your feedback" as a standalone line.
-6. Return ONLY the final response text with no extra commentary or quotes.`;
+5. Classify the review into exactly ONE of the following categories based on its content:
+   - "praise": Purely complimentary review with no complaints.
+   - "bug": Review reporting something broken, crashing, or an error.
+   - "feature": Review requesting new features, functionality, or enhancements.
+   - "other": Anything that doesn't clearly fit praise, bug, or feature.
+6. You MUST respond ONLY in valid JSON format with no extra prose before or after.
+JSON Structure:
+{
+  "reply": "Your under 350-character reply text here",
+  "tag": "praise"
+}`;
 
   const userPrompt = `User Review (${starRating}/5 stars):\n"${reviewText || '(No text provided)'}"`;
 
@@ -46,7 +55,7 @@ Guidelines:
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        max_tokens: 150,
+        max_tokens: 250,
         temperature: 0.7,
       }),
     });
@@ -62,7 +71,36 @@ Guidelines:
       throw new Error('Unexpected response format from DeepSeek API.');
     }
 
-    let replyText = data.choices[0].message.content.trim();
+    let rawContent = data.choices[0].message.content.trim();
+
+    // Strip markdown code fences if present
+    if (rawContent.startsWith('```')) {
+      rawContent = rawContent.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
+
+    let replyText = '';
+    let tag = 'other';
+
+    try {
+      const parsed = JSON.parse(rawContent);
+      if (parsed && typeof parsed.reply === 'string') {
+        replyText = parsed.reply.trim();
+      }
+      if (parsed && typeof parsed.tag === 'string') {
+        const validTags = ['praise', 'bug', 'feature', 'other'];
+        const normalizedTag = parsed.tag.trim().toLowerCase();
+        if (validTags.includes(normalizedTag)) {
+          tag = normalizedTag;
+        }
+      }
+    } catch (parseErr) {
+      replyText = rawContent;
+      tag = 'other';
+    }
+
+    if (!replyText) {
+      replyText = rawContent;
+    }
 
     // Remove wrapping quotes if AI included them
     if ((replyText.startsWith('"') && replyText.endsWith('"')) || (replyText.startsWith("'") && replyText.endsWith("'"))) {
@@ -74,7 +112,7 @@ Guidelines:
       replyText = replyText.substring(0, 347) + '...';
     }
 
-    return replyText;
+    return { replyText, tag };
 
   } catch (error) {
     throw new Error(`[DEEPSEEK ERROR] Failed to generate AI reply: ${error.message}`);

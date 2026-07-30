@@ -12,13 +12,17 @@ const REVIEWS_COLLECTION = 'reviews';
  * @param {number} params.starRating Star rating (1-5)
  * @param {string} params.reviewText Content of the review
  * @param {string} params.draftReply Generated AI reply text
+ * @param {string} [params.tag='other'] AI category tag ('praise' | 'bug' | 'feature' | 'other')
  * @param {string} [params.status='pending_approval'] Status of the review ('pending_approval' or 'posted')
  * @returns {Promise<Object>} Saved review document metadata
  */
-async function saveDraftReview({ customerId, packageName, reviewId, authorName, starRating, reviewText, draftReply, status = 'pending_approval' }) {
+async function saveDraftReview({ customerId, packageName, reviewId, authorName, starRating, reviewText, draftReply, tag = 'other', status = 'pending_approval' }) {
   if (!customerId || !packageName || !reviewId) {
     throw new Error('[REVIEW MODEL ERROR] Missing required fields (customerId, packageName, reviewId).');
   }
+
+  const validTags = ['praise', 'bug', 'feature', 'other'];
+  const safeTag = validTags.includes(tag) ? tag : 'other';
 
   const reviewData = {
     customerId,
@@ -29,6 +33,7 @@ async function saveDraftReview({ customerId, packageName, reviewId, authorName, 
     reviewText: reviewText || '',
     draftReply: draftReply || '',
     originalAiDraft: draftReply || '',
+    tag: safeTag,
     status: status || 'pending_approval',
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   };
@@ -115,6 +120,46 @@ async function getPendingReviewsByCustomer(customerId) {
 }
 
 /**
+ * Retrieves all review documents with status 'posted' or 'rejected' belonging to a specific customer.
+ * Sorted newest first in memory.
+ * @param {string} customerId Firestore Customer ID
+ * @returns {Promise<Array<Object>>} List of historical review objects for the customer
+ */
+async function getCustomerReviewHistory(customerId) {
+  if (!customerId) return [];
+
+  const snapshot = await db
+    .collection(REVIEWS_COLLECTION)
+    .where('customerId', '==', customerId)
+    .where('status', 'in', ['posted', 'rejected'])
+    .get();
+
+  const reviews = [];
+
+  snapshot.forEach((doc) => {
+    const data = doc.data();
+    reviews.push({
+      id: doc.id,
+      ...data,
+      createdAt: data.createdAt ? data.createdAt.toDate() : null,
+      postedAt: data.postedAt ? data.postedAt.toDate() : null,
+      updatedAt: data.updatedAt ? data.updatedAt.toDate() : null,
+    });
+  });
+
+  // Sort newest first
+  reviews.sort((a, b) => {
+    const getTime = (item) => {
+      const date = item.postedAt || item.updatedAt || item.createdAt;
+      return date ? new Date(date).getTime() : 0;
+    };
+    return getTime(b) - getTime(a);
+  });
+
+  return reviews;
+}
+
+/**
  * Fetches a single review document from Firestore by its document ID.
  * @param {string} docId Firestore Document ID
  * @returns {Promise<Object|null>} Review document object or null if not found
@@ -176,6 +221,7 @@ module.exports = {
   reviewExists,
   getPendingReviews,
   getPendingReviewsByCustomer,
+  getCustomerReviewHistory,
   getReviewById,
   updateReviewStatus,
 };

@@ -286,6 +286,74 @@ h1, h2, h3 {
   color: var(--mint);
 }
 
+/* Tag Badges */
+.tag-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
+}
+
+.tag-badge.tag-praise {
+  background: rgba(95, 203, 155, 0.15);
+  color: var(--mint);
+  border-color: rgba(95, 203, 155, 0.4);
+}
+
+.tag-badge.tag-bug {
+  background: rgba(168, 68, 43, 0.15);
+  color: #f7a390;
+  border-color: rgba(168, 68, 43, 0.4);
+}
+
+.tag-badge.tag-feature {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.tag-badge.tag-other {
+  background: rgba(171, 159, 136, 0.15);
+  color: var(--text-muted);
+  border-color: rgba(171, 159, 136, 0.3);
+}
+
+/* Dashboard Tab-Based Navigation */
+.dashboard-tabs {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 2px;
+}
+
+.dashboard-tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.dashboard-tab-btn:hover {
+  color: var(--text);
+}
+
+.dashboard-tab-btn.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
 /* Customer Dashboard Grid & Cards */
 .dashboard-card {
   background: var(--bg-panel);
@@ -589,7 +657,7 @@ h1, h2, h3 {
 .collapsed-left {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
   flex: 1;
 }
@@ -607,7 +675,7 @@ h1, h2, h3 {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 520px;
+  max-width: 480px;
 }
 
 .collapsed-right {
