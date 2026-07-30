@@ -140,7 +140,7 @@ export default function App() {
     }
   };
 
-  // Customer Toggle Auto-Post Mode Handler
+  // Customer Toggle Auto-Post Mode Handler (With Auto-Bulk Posting when Turning ON)
   const handleToggleAutoPost = async () => {
     if (!currentUser || !customerProfile) return;
 
@@ -166,7 +166,31 @@ export default function App() {
 
       if (json.success) {
         setCustomerProfile(prev => prev ? { ...prev, autoPostEnabled: nextState } : prev);
-        setDashboardSuccess(`Auto-post mode ${nextState ? 'ENABLED' : 'DISABLED'} for your account.`);
+
+        if (nextState === true) {
+          // Immediately trigger background bulk posting of existing pending reviews
+          try {
+            const bulkRes = await fetch(`${API_BASE}/customer/autopost/bulk-post-pending`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const bulkJson = await bulkRes.json();
+            if (bulkJson.success) {
+              await fetchCustomerReviews(currentUser);
+              if (bulkJson.postedCount > 0) {
+                setDashboardSuccess(`Auto-post enabled — ${bulkJson.postedCount} pending review(s) posted to Google Play.`);
+              } else {
+                setDashboardSuccess('Auto-post mode ENABLED for your account.');
+              }
+            } else {
+              setDashboardSuccess('Auto-post mode ENABLED for your account.');
+            }
+          } catch (bulkErr) {
+            setDashboardSuccess('Auto-post mode ENABLED for your account.');
+          }
+        } else {
+          setDashboardSuccess('Auto-post mode DISABLED for your account.');
+        }
       } else {
         setDashboardError(`Failed to update auto-post mode: ${json.error}`);
       }
@@ -683,7 +707,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* REQUIREMENT 1: SUMMARY BAR & BULK APPROVE ACTION */}
+              {/* SUMMARY BAR & BULK APPROVE ACTION */}
               {reviews.length > 0 && (
                 <div className="pending-summary-bar">
                   <div className="summary-left">
@@ -696,7 +720,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* REQUIREMENT 6: BULK APPROVE FOR UNEDITED POSITIVE REVIEWS */}
+                  {/* BULK APPROVE FOR UNEDITED POSITIVE REVIEWS */}
                   {qualifyingBulkReviews.length > 0 && (
                     <button
                       className="btn-bulk-approve"
@@ -709,7 +733,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* REQUIREMENT 2 & 3: FILTER CHIPS & SORT CONTROLS */}
+              {/* FILTER CHIPS & SORT CONTROLS */}
               {reviews.length > 0 && (
                 <div className="pending-controls-bar">
                   <div className="filter-chips">
@@ -788,13 +812,9 @@ export default function App() {
                     const isEditedInSession = typeof editedTexts[review.id] === 'string' &&
                       editedTexts[review.id].trim() !== (review.draftReply || '').trim();
 
-                    const reviewSnippet = review.reviewText
-                      ? (review.reviewText.length > 100 ? `${review.reviewText.substring(0, 100)}...` : review.reviewText)
-                      : 'No review text provided.';
-
                     return (
                       <div key={review.id} style={{ display: 'flex', flexDirection: 'column' }}>
-                        {/* REQUIREMENT 4: COLLAPSED ROW VIEW */}
+                        {/* COLLAPSED ROW VIEW */}
                         <div
                           className={`collapsed-row ${isExpanded ? 'expanded-active' : ''}`}
                           onClick={() => setExpandedDocId(isExpanded ? null : review.id)}
@@ -811,7 +831,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* REQUIREMENT 5: EXPANDED CARD VIEW (ACCORDION) */}
+                        {/* EXPANDED CARD VIEW (ACCORDION) */}
                         {isExpanded && (
                           <div className="expanded-card-wrap">
                             <div className="review-card">
@@ -888,7 +908,7 @@ export default function App() {
                     );
                   })}
 
-                  {/* REQUIREMENT 7: PAGINATION / LOAD MORE BUTTON */}
+                  {/* PAGINATION / LOAD MORE BUTTON */}
                   {sortedReviews.length > visibleLimit && (
                     <div className="load-more-container">
                       <button

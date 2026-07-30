@@ -358,6 +358,40 @@ router.post('/customer/autopost', verifyCustomerAuth, async (req, res) => {
 });
 
 /**
+ * POST /api/customer/autopost/bulk-post-pending
+ * Protected endpoint that posts all pending_approval reviews for the logged-in customer as-is.
+ * Continues through all pending reviews even if an individual post fails.
+ */
+router.post('/customer/autopost/bulk-post-pending', verifyCustomerAuth, async (req, res) => {
+  try {
+    const pendingReviews = await getPendingReviewsByCustomer(req.customer.id);
+    let postedCount = 0;
+    let failedCount = 0;
+
+    for (const review of pendingReviews) {
+      try {
+        await postApprovedReply(review.id);
+        postedCount++;
+      } catch (err) {
+        console.error(`[BULK POST ERROR] Failed to post reply for review ${review.id}:`, err);
+        failedCount++;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      postedCount,
+      failedCount,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: `Failed to bulk post pending reviews: ${error.message}`,
+    });
+  }
+});
+
+/**
  * POST /api/customer/verify-connection
  * Protected endpoint to test Google Play Console Developer API connection using stored credentials.
  * On success: updates onboardingStatus to "ACTIVE".

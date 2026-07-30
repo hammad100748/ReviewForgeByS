@@ -7,7 +7,7 @@ const apiRouter = require('./api/routes');
 const { runDetectionCycle } = require('./services/detectReviews');
 
 const PORT = process.env.PORT || 3001;
-const CRON_SCHEDULE = '*/30 * * * *'; // Every 30 minutes
+const CRON_SCHEDULE = '*/5 * * * *'; // Every 30 minutes
 
 /**
  * Returns current timestamp string formatted as [YYYY-MM-DD HH:mm:ss]
