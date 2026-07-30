@@ -58,6 +58,14 @@ export default function App() {
   const [dashboardError, setDashboardError] = useState('');
   const [dashboardSuccess, setDashboardSuccess] = useState('');
 
+  // Scalable Pending Reviews UI State (Filter, Sort, Accordion, Pagination, Bulk)
+  const [filterBucket, setFilterBucket] = useState('ALL'); // 'ALL' | '1-2' | '3' | '4-5'
+  const [sortBy, setSortBy] = useState('RATING_LOW'); // 'RATING_LOW' | 'RATING_HIGH' | 'NEWEST' | 'OLDEST'
+  const [expandedDocId, setExpandedDocId] = useState(null);
+  const [visibleLimit, setVisibleLimit] = useState(15);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
@@ -132,7 +140,7 @@ export default function App() {
     }
   };
 
-  // Customer Toggle Auto-Post Mode Handler (with Error Reversion)
+  // Customer Toggle Auto-Post Mode Handler
   const handleToggleAutoPost = async () => {
     if (!currentUser || !customerProfile) return;
 
@@ -222,6 +230,7 @@ export default function App() {
       const json = await res.json();
       if (json.success) {
         setReviews(prev => prev.filter(r => r.id !== docId));
+        if (expandedDocId === docId) setExpandedDocId(null);
         setDashboardSuccess(`Review reply approved and posted to Google Play Store!`);
       } else {
         setDashboardError(`Failed to approve review: ${json.error}`);
@@ -257,6 +266,7 @@ export default function App() {
       const json = await res.json();
       if (json.success) {
         setReviews(prev => prev.filter(r => r.id !== docId));
+        if (expandedDocId === docId) setExpandedDocId(null);
         setDashboardSuccess(`Edited reply successfully posted to Google Play Store!`);
       } else {
         setDashboardError(`Failed to post edited reply: ${json.error}`);
@@ -283,6 +293,7 @@ export default function App() {
       const json = await res.json();
       if (json.success) {
         setReviews(prev => prev.filter(r => r.id !== docId));
+        if (expandedDocId === docId) setExpandedDocId(null);
         setDashboardSuccess(`Review draft rejected and removed from pending queue.`);
       } else {
         setDashboardError(`Failed to reject review: ${json.error}`);
@@ -327,7 +338,7 @@ export default function App() {
     }
   };
 
-  // Step 2: Handle Password Submit (Deterministic Path Driven by Backend hasAuthAccount)
+  // Step 2: Handle Password Submit
   const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -342,10 +353,8 @@ export default function App() {
 
     try {
       if (hasAuthAccount) {
-        // Returning User Path -> Log In
         await signInWithEmailAndPassword(auth, trimmedEmail, password);
       } else {
-        // First-Time Setup Path -> Create Password & Account
         try {
           await createUserWithEmailAndPassword(auth, trimmedEmail, password);
         } catch (createErr) {
@@ -387,6 +396,104 @@ export default function App() {
     } catch (err) {
       console.error('Sign out error:', err);
     }
+  };
+
+  // Derived Statistics for Summary Bar & Filter Chips
+  const totalCount = reviews.length;
+  const totalPending = totalCount;
+  const lowCount = reviews.filter(r => r.starRating <= 2).length;
+  const midCount = reviews.filter(r => r.starRating === 3).length;
+  const highCount = reviews.filter(r => r.starRating >= 4).length;
+
+  // Unedited 4-5 star reviews for Bulk Approval
+  const qualifyingBulkReviews = reviews.filter(r => {
+    if (r.starRating < 4) return false;
+    const currentText = editedTexts[r.id];
+    if (typeof currentText === 'string' && currentText.trim() !== (r.draftReply || '').trim()) {
+      return false;
+    }
+    return true;
+  });
+
+  // Client-Side Filtered Reviews
+  const filteredReviews = reviews.filter(r => {
+    if (filterBucket === '1-2') return r.starRating <= 2;
+    if (filterBucket === '3') return r.starRating === 3;
+    if (filterBucket === '4-5') return r.starRating >= 4;
+    return true;
+  });
+
+  // Client-Side Sorted Reviews
+  const sortedReviews = [...filteredReviews].sort((a, b) => {
+    const getTime = (item) => {
+      if (item.createdAtDate) return new Date(item.createdAtDate).getTime();
+      if (item.createdAt) {
+        return typeof item.createdAt.toDate === 'function' ? item.createdAt.toDate().getTime() : new Date(item.createdAt).getTime();
+      }
+      return 0;
+    };
+
+    if (sortBy === 'RATING_LOW') {
+      if (a.starRating !== b.starRating) return a.starRating - b.starRating;
+      return getTime(a) - getTime(b);
+    }
+    if (sortBy === 'RATING_HIGH') {
+      if (a.starRating !== b.starRating) return b.starRating - a.starRating;
+      return getTime(a) - getTime(b);
+    }
+    if (sortBy === 'NEWEST') {
+      return getTime(b) - getTime(a);
+    }
+    if (sortBy === 'OLDEST') {
+      return getTime(a) - getTime(b);
+    }
+    return 0;
+  });
+
+  const visibleReviews = sortedReviews.slice(0, visibleLimit);
+
+  // Bulk Approve Action Execution
+  const handleBulkApproveExecution = async () => {
+    if (!currentUser || qualifyingBulkReviews.length === 0) return;
+
+    setBulkProcessing(true);
+    setShowBulkModal(false);
+    setDashboardError('');
+    setDashboardSuccess('');
+
+    const total = qualifyingBulkReviews.length;
+    let successCount = 0;
+    const postedIds = [];
+
+    for (let i = 0; i < total; i++) {
+      const review = qualifyingBulkReviews[i];
+      setDashboardSuccess(`Bulk posting in progress: ${i + 1} of ${total}...`);
+
+      try {
+        const token = await currentUser.getIdToken();
+        const res = await fetch(`${API_BASE}/customer/reviews/${review.id}/approve`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json();
+        if (json.success) {
+          successCount++;
+          postedIds.push(review.id);
+        }
+      } catch (err) {
+        console.error(`Bulk approve error for review ${review.id}:`, err);
+      }
+    }
+
+    if (postedIds.length > 0) {
+      setReviews(prev => prev.filter(r => !postedIds.includes(r.id)));
+      if (postedIds.includes(expandedDocId)) setExpandedDocId(null);
+      setDashboardSuccess(`${successCount} replies posted successfully to Google Play Store!`);
+    } else {
+      setDashboardError(`Bulk approval process finished, but 0 replies were posted.`);
+    }
+
+    setBulkProcessing(false);
   };
 
   if (authLoading) {
@@ -496,7 +603,7 @@ export default function App() {
               </button>
             </div>
           ) : isActive ? (
-            /* STATE B: ACTIVE (Live Review Approval Dashboard with Auto-Post Toggle) */
+            /* STATE B: ACTIVE (Scalable Pending Reviews Dashboard) */
             <div style={{ width: '100%' }}>
 
               {/* Self-Serve Auto-Post Toggle Control Box */}
@@ -559,7 +666,7 @@ export default function App() {
                 <h3 style={{ fontSize: '18px' }}>
                   Pending Review Approvals ({reviews.length})
                 </h3>
-                <button className="btn-ghost" onClick={() => fetchCustomerReviews(currentUser)} disabled={loadingReviews} style={{ padding: '6px 12px', fontSize: '13px' }}>
+                <button className="btn-ghost" onClick={() => fetchCustomerReviews(currentUser)} disabled={loadingReviews || bulkProcessing} style={{ padding: '6px 12px', fontSize: '13px' }}>
                   {loadingReviews ? 'Refreshing...' : '↻ Refresh Queue'}
                 </button>
               </div>
@@ -576,6 +683,78 @@ export default function App() {
                 </div>
               )}
 
+              {/* REQUIREMENT 1: SUMMARY BAR & BULK APPROVE ACTION */}
+              {reviews.length > 0 && (
+                <div className="pending-summary-bar">
+                  <div className="summary-left">
+                    <span className="summary-total">{totalPending} Pending</span>
+                    <span style={{ color: 'var(--line)' }}>•</span>
+                    <div className="summary-breakdown">
+                      <span className="summary-chip">{lowCount} are 1-2★</span>
+                      <span className="summary-chip">{midCount} are 3★</span>
+                      <span className="summary-chip">{highCount} are 4-5★</span>
+                    </div>
+                  </div>
+
+                  {/* REQUIREMENT 6: BULK APPROVE FOR UNEDITED POSITIVE REVIEWS */}
+                  {qualifyingBulkReviews.length > 0 && (
+                    <button
+                      className="btn-bulk-approve"
+                      onClick={() => setShowBulkModal(true)}
+                      disabled={bulkProcessing}
+                    >
+                      ⚡ Approve All Unedited 4-5★ ({qualifyingBulkReviews.length})
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* REQUIREMENT 2 & 3: FILTER CHIPS & SORT CONTROLS */}
+              {reviews.length > 0 && (
+                <div className="pending-controls-bar">
+                  <div className="filter-chips">
+                    <button
+                      className={`chip-btn ${filterBucket === 'ALL' ? 'active' : ''}`}
+                      onClick={() => { setFilterBucket('ALL'); setVisibleLimit(15); }}
+                    >
+                      All ({totalCount})
+                    </button>
+                    <button
+                      className={`chip-btn ${filterBucket === '1-2' ? 'active' : ''}`}
+                      onClick={() => { setFilterBucket('1-2'); setVisibleLimit(15); }}
+                    >
+                      1-2★ ({lowCount})
+                    </button>
+                    <button
+                      className={`chip-btn ${filterBucket === '3' ? 'active' : ''}`}
+                      onClick={() => { setFilterBucket('3'); setVisibleLimit(15); }}
+                    >
+                      3★ ({midCount})
+                    </button>
+                    <button
+                      className={`chip-btn ${filterBucket === '4-5' ? 'active' : ''}`}
+                      onClick={() => { setFilterBucket('4-5'); setVisibleLimit(15); }}
+                    >
+                      4-5★ ({highCount})
+                    </button>
+                  </div>
+
+                  <div className="sort-group">
+                    <label>Sort by:</label>
+                    <select
+                      className="sort-select"
+                      value={sortBy}
+                      onChange={(e) => { setSortBy(e.target.value); setVisibleLimit(15); }}
+                    >
+                      <option value="RATING_LOW">Lowest Rating First</option>
+                      <option value="RATING_HIGH">Highest Rating First</option>
+                      <option value="NEWEST">Newest First</option>
+                      <option value="OLDEST">Oldest First</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
               {/* Reviews List / Empty Queue State */}
               {loadingReviews ? (
                 <div className="dashboard-card" style={{ textAlign: 'center' }}>
@@ -589,85 +768,138 @@ export default function App() {
                     No reviews are currently awaiting approval for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong>.
                   </p>
                 </div>
+              ) : sortedReviews.length === 0 ? (
+                <div className="dashboard-card" style={{ textAlign: 'center', padding: '36px 24px' }}>
+                  <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>No reviews match filter</h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
+                    Try selecting a different star rating filter above.
+                  </p>
+                </div>
               ) : (
-                <div className="reviews-grid" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  {reviews.map((review) => {
+                <div className="reviews-grid" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {visibleReviews.map((review) => {
+                    const isExpanded = expandedDocId === review.id;
                     const isProcessing = processingDocs[review.id];
                     const currentText = editedTexts[review.id] ?? (review.draftReply || '');
                     const charCount = currentText.length;
                     const isOverLimit = charCount > 350;
 
+                    // Check if edited in current session
+                    const isEditedInSession = typeof editedTexts[review.id] === 'string' &&
+                      editedTexts[review.id].trim() !== (review.draftReply || '').trim();
+
+                    const reviewSnippet = review.reviewText
+                      ? (review.reviewText.length > 100 ? `${review.reviewText.substring(0, 100)}...` : review.reviewText)
+                      : 'No review text provided.';
+
                     return (
-                      <div key={review.id} className="review-card">
-                        {/* Review Author & Rating Bar */}
-                        <div className="review-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                          <div>
-                            <strong style={{ fontSize: '15px' }}>{review.authorName || 'Anonymous User'}</strong>
-                            <div style={{ fontSize: '13px', color: 'var(--gold)', marginTop: '2px' }}>
-                              <StarRating rating={review.starRating} /> ({review.starRating} / 5 stars)
+                      <div key={review.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                        {/* REQUIREMENT 4: COLLAPSED ROW VIEW */}
+                        <div
+                          className={`collapsed-row ${isExpanded ? 'expanded-active' : ''}`}
+                          onClick={() => setExpandedDocId(isExpanded ? null : review.id)}
+                        >
+                          <div className="collapsed-left">
+                            <StarRating rating={review.starRating} />
+                            <span className="collapsed-author">{review.authorName || 'Anonymous'}</span>
+                            <span className="collapsed-snippet">"{review.reviewText}"</span>
+                          </div>
+
+                          <div className="collapsed-right">
+                            {isEditedInSession && <span className="badge-edited">Edited</span>}
+                            <span className="chevron-icon">{isExpanded ? '▲' : '▼'}</span>
+                          </div>
+                        </div>
+
+                        {/* REQUIREMENT 5: EXPANDED CARD VIEW (ACCORDION) */}
+                        {isExpanded && (
+                          <div className="expanded-card-wrap">
+                            <div className="review-card">
+                              {/* Review Author & Rating Bar */}
+                              <div className="review-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                <div>
+                                  <strong style={{ fontSize: '15px' }}>{review.authorName || 'Anonymous User'}</strong>
+                                  <div style={{ fontSize: '13px', color: 'var(--gold)', marginTop: '2px' }}>
+                                    <StarRating rating={review.starRating} /> ({review.starRating} / 5 stars)
+                                  </div>
+                                </div>
+                                <span className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                  ID: {review.id}
+                                </span>
+                              </div>
+
+                              {/* Customer Review Text */}
+                              <div className="review-body" style={{ background: 'var(--bg-panel-2)', padding: '14px', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '16px', fontSize: '14px', lineHeight: '1.6' }}>
+                                "{review.reviewText}"
+                              </div>
+
+                              {/* Editable AI Draft Reply Box */}
+                              <div className="form-group" style={{ marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                  <label style={{ fontSize: '12.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    AI Draft Reply (Editable)
+                                  </label>
+                                  <span className="mono" style={{ fontSize: '12px', color: isOverLimit ? 'var(--red)' : 'var(--text-muted)' }}>
+                                    {charCount} / 350 max characters
+                                  </span>
+                                </div>
+                                <textarea
+                                  className="form-textarea"
+                                  value={currentText}
+                                  onChange={(e) => setEditedTexts({ ...editedTexts, [review.id]: e.target.value })}
+                                  disabled={isProcessing}
+                                  rows={3}
+                                  style={{
+                                    borderColor: isOverLimit ? 'var(--red)' : undefined,
+                                  }}
+                                />
+                              </div>
+
+                              {/* Action Buttons Toolbar */}
+                              <div className="review-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                <button
+                                  className="btn btn-approve"
+                                  onClick={() => handleApprove(review.id)}
+                                  disabled={isProcessing || isOverLimit}
+                                >
+                                  {isProcessing ? 'Posting...' : '✓ Approve & Post'}
+                                </button>
+
+                                <button
+                                  className="btn btn-edit"
+                                  onClick={() => handleEditAndApprove(review.id)}
+                                  disabled={isProcessing || isOverLimit}
+                                >
+                                  {isProcessing ? 'Posting...' : '✏️ Save Edit & Post'}
+                                </button>
+
+                                <button
+                                  className="btn btn-reject"
+                                  onClick={() => handleReject(review.id)}
+                                  disabled={isProcessing}
+                                >
+                                  {isProcessing ? 'Rejecting...' : '✕ Reject'}
+                                </button>
+                              </div>
                             </div>
                           </div>
-                          <span className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                            ID: {review.id}
-                          </span>
-                        </div>
-
-                        {/* Customer Review Text */}
-                        <div className="review-body" style={{ background: 'var(--bg-panel-2)', padding: '14px', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '16px', fontSize: '14px', lineHeight: '1.6' }}>
-                          "{review.reviewText}"
-                        </div>
-
-                        {/* Editable AI Draft Reply Box */}
-                        <div className="form-group" style={{ marginBottom: '16px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                            <label style={{ fontSize: '12.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              AI Draft Reply (Editable)
-                            </label>
-                            <span className="mono" style={{ fontSize: '12px', color: isOverLimit ? 'var(--red)' : 'var(--text-muted)' }}>
-                              {charCount} / 350 max characters
-                            </span>
-                          </div>
-                          <textarea
-                            className="form-textarea"
-                            value={currentText}
-                            onChange={(e) => setEditedTexts({ ...editedTexts, [review.id]: e.target.value })}
-                            disabled={isProcessing}
-                            rows={3}
-                            style={{
-                              borderColor: isOverLimit ? 'var(--red)' : undefined,
-                            }}
-                          />
-                        </div>
-
-                        {/* Action Buttons Toolbar */}
-                        <div className="review-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                          <button
-                            className="btn btn-approve"
-                            onClick={() => handleApprove(review.id)}
-                            disabled={isProcessing || isOverLimit}
-                          >
-                            {isProcessing ? 'Posting...' : '✓ Approve & Post'}
-                          </button>
-
-                          <button
-                            className="btn btn-edit"
-                            onClick={() => handleEditAndApprove(review.id)}
-                            disabled={isProcessing || isOverLimit}
-                          >
-                            {isProcessing ? 'Posting...' : '✏️ Save Edit & Post'}
-                          </button>
-
-                          <button
-                            className="btn btn-reject"
-                            onClick={() => handleReject(review.id)}
-                            disabled={isProcessing}
-                          >
-                            {isProcessing ? 'Rejecting...' : '✕ Reject'}
-                          </button>
-                        </div>
+                        )}
                       </div>
                     );
                   })}
+
+                  {/* REQUIREMENT 7: PAGINATION / LOAD MORE BUTTON */}
+                  {sortedReviews.length > visibleLimit && (
+                    <div className="load-more-container">
+                      <button
+                        className="btn-ghost"
+                        onClick={() => setVisibleLimit(prev => prev + 15)}
+                        style={{ padding: '10px 24px', fontSize: '14px' }}
+                      >
+                        Load More ({sortedReviews.length - visibleLimit} remaining)
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -686,6 +918,37 @@ export default function App() {
             </div>
           )}
         </main>
+
+        {/* BULK APPROVE CONFIRMATION MODAL */}
+        {showBulkModal && (
+          <div className="bulk-modal-overlay" onClick={() => setShowBulkModal(false)}>
+            <div className="bulk-modal-card" onClick={(e) => e.stopPropagation()}>
+              <h3 style={{ fontSize: '20px', marginBottom: '12px', color: 'var(--text)' }}>
+                Bulk Approve Positive Reviews
+              </h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '14.5px', lineHeight: '1.6', marginBottom: '24px' }}>
+                This will immediately post <strong>{qualifyingBulkReviews.length}</strong> review replies to Google Play Store using their AI-generated drafts as-is. Continue?
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                <button
+                  className="btn-ghost"
+                  onClick={() => setShowBulkModal(false)}
+                  disabled={bulkProcessing}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn-primary"
+                  onClick={handleBulkApproveExecution}
+                  disabled={bulkProcessing}
+                  style={{ width: 'auto' }}
+                >
+                  {bulkProcessing ? 'Posting Replies...' : 'Yes, Approve All'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
