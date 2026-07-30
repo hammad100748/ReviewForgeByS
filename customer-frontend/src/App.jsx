@@ -168,7 +168,6 @@ export default function App() {
         setCustomerProfile(prev => prev ? { ...prev, autoPostEnabled: nextState } : prev);
 
         if (nextState === true) {
-          // Immediately trigger background bulk posting of existing pending reviews
           try {
             const bulkRes = await fetch(`${API_BASE}/customer/autopost/bulk-post-pending`, {
               method: 'POST',
@@ -239,44 +238,26 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Customer Action: Approve & Post Reply
+  // Single Merged Customer Action: Approve & Post Reply (Always sends current textarea contents)
   const handleApprove = async (docId) => {
     if (!currentUser) return;
-    setProcessingDocs(prev => ({ ...prev, [docId]: true }));
-    setDashboardError('');
-    setDashboardSuccess('');
-    try {
-      const token = await currentUser.getIdToken();
-      const res = await fetch(`${API_BASE}/customer/reviews/${docId}/approve`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      if (json.success) {
-        setReviews(prev => prev.filter(r => r.id !== docId));
-        if (expandedDocId === docId) setExpandedDocId(null);
-        setDashboardSuccess(`Review reply approved and posted to Google Play Store!`);
-      } else {
-        setDashboardError(`Failed to approve review: ${json.error}`);
-      }
-    } catch (err) {
-      setDashboardError(`API error during approve: ${err.message}`);
-    } finally {
-      setProcessingDocs(prev => ({ ...prev, [docId]: false }));
-    }
-  };
+    const currentText = editedTexts[docId] ?? '';
+    const trimmedText = currentText.trim();
 
-  // Customer Action: Save Edit & Post Reply
-  const handleEditAndApprove = async (docId) => {
-    if (!currentUser) return;
-    const newText = editedTexts[docId] || '';
-    if (!newText.trim()) {
+    if (!trimmedText) {
       setDashboardError('Reply text cannot be empty.');
       return;
     }
+
+    if (trimmedText.length > 350) {
+      setDashboardError(`Reply text length (${trimmedText.length} chars) exceeds Google's 350-character limit.`);
+      return;
+    }
+
     setProcessingDocs(prev => ({ ...prev, [docId]: true }));
     setDashboardError('');
     setDashboardSuccess('');
+
     try {
       const token = await currentUser.getIdToken();
       const res = await fetch(`${API_BASE}/customer/reviews/${docId}/edit-approve`, {
@@ -285,18 +266,19 @@ export default function App() {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ newText: newText.trim() }),
+        body: JSON.stringify({ newText: trimmedText }),
       });
+
       const json = await res.json();
       if (json.success) {
         setReviews(prev => prev.filter(r => r.id !== docId));
         if (expandedDocId === docId) setExpandedDocId(null);
-        setDashboardSuccess(`Edited reply successfully posted to Google Play Store!`);
+        setDashboardSuccess('Reply posted to Google Play Store!');
       } else {
-        setDashboardError(`Failed to post edited reply: ${json.error}`);
+        setDashboardError(`Failed to post reply: ${json.error}`);
       }
     } catch (err) {
-      setDashboardError(`API error during edit & approve: ${err.message}`);
+      setDashboardError(`API error during post: ${err.message}`);
     } finally {
       setProcessingDocs(prev => ({ ...prev, [docId]: false }));
     }
@@ -875,7 +857,7 @@ export default function App() {
                                 />
                               </div>
 
-                              {/* Action Buttons Toolbar */}
+                              {/* Action Buttons Toolbar (SINGLE UNIFIED "Approve & Post" + "Reject") */}
                               <div className="review-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                                 <button
                                   className="btn btn-approve"
@@ -883,14 +865,6 @@ export default function App() {
                                   disabled={isProcessing || isOverLimit}
                                 >
                                   {isProcessing ? 'Posting...' : '✓ Approve & Post'}
-                                </button>
-
-                                <button
-                                  className="btn btn-edit"
-                                  onClick={() => handleEditAndApprove(review.id)}
-                                  disabled={isProcessing || isOverLimit}
-                                >
-                                  {isProcessing ? 'Posting...' : '✏️ Save Edit & Post'}
                                 </button>
 
                                 <button
