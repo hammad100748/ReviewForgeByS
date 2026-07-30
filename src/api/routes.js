@@ -714,7 +714,15 @@ router.get('/customers/by-email', async (req, res) => {
       await admin.auth().getUserByEmail(trimmedEmail);
       hasAuthAccount = true;
     } catch (authErr) {
-      hasAuthAccount = false;
+      if (authErr.code === 'auth/user-not-found') {
+        hasAuthAccount = false;
+      } else {
+        console.error(`[AUTH CHECK ERROR] Unexpected error checking Firebase Auth for '${trimmedEmail}':`, authErr);
+        return res.status(500).json({
+          success: false,
+          error: `Error checking Firebase Auth user status: ${authErr.message}`,
+        });
+      }
     }
 
     return res.status(200).json({
