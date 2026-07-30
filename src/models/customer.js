@@ -31,15 +31,16 @@ async function findCustomerByEmail(email) {
  * @param {Object} params
  * @param {string} params.name Customer Name
  * @param {string} params.email Customer Email
+ * @param {string} params.appName App Display Name
  * @param {string} params.packageName Android App Package Name
  * @param {string|Object} params.serviceAccountJson Service Account JSON object or string
  * @param {boolean} [params.autoPostEnabled=false] Optional autoPostEnabled flag (default false)
  * @param {string} [params.onboardingStatus='AWAITING_VERIFICATION'] Onboarding status
  * @returns {Promise<Object>} Created customer metadata including Firestore document ID
  */
-async function addCustomer({ name, email, packageName, serviceAccountJson, autoPostEnabled = false, onboardingStatus = 'AWAITING_VERIFICATION' }) {
-  if (!name || !email || !packageName || !serviceAccountJson) {
-    throw new Error('[CUSTOMER MODEL ERROR] Missing required parameters (name, email, packageName, serviceAccountJson).');
+async function addCustomer({ name, email, appName, packageName, serviceAccountJson, autoPostEnabled = false, onboardingStatus = 'AWAITING_VERIFICATION' }) {
+  if (!name || !email || !appName || !packageName || !serviceAccountJson) {
+    throw new Error('[CUSTOMER MODEL ERROR] Missing required parameters (name, email, appName, packageName, serviceAccountJson).');
   }
 
   const normalizedEmail = email.trim().toLowerCase();
@@ -53,6 +54,7 @@ async function addCustomer({ name, email, packageName, serviceAccountJson, autoP
   const customerData = {
     name: name.trim(),
     email: normalizedEmail,
+    appName: appName.trim(),
     packageName: packageName.trim(),
     encryptedServiceAccount,
     autoPostEnabled: Boolean(autoPostEnabled),
@@ -67,6 +69,7 @@ async function addCustomer({ name, email, packageName, serviceAccountJson, autoP
     id: docRef.id,
     name: customerData.name,
     email: customerData.email,
+    appName: customerData.appName,
     packageName: customerData.packageName,
     autoPostEnabled: customerData.autoPostEnabled,
     onboardingStatus: customerData.onboardingStatus,
@@ -141,6 +144,7 @@ async function getCustomer(customerId) {
     id: doc.id,
     name: data.name,
     email: data.email,
+    appName: data.appName || '',
     packageName: data.packageName,
     autoPostEnabled: Boolean(data.autoPostEnabled),
     onboardingStatus: data.onboardingStatus || 'AWAITING_VERIFICATION',
@@ -179,6 +183,7 @@ async function getAllActiveCustomers() {
       id: doc.id,
       name: data.name,
       email: data.email,
+      appName: data.appName || '',
       packageName: data.packageName,
       autoPostEnabled: Boolean(data.autoPostEnabled),
       onboardingStatus: data.onboardingStatus || 'AWAITING_VERIFICATION',

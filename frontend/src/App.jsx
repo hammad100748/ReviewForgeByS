@@ -4,30 +4,32 @@ const rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:300
 const API_BASE = `${rawApiBaseUrl.replace(/\/$/, '')}/api`;
 
 export default function App() {
-  // Memory-only Admin Auth Header ("Basic <base64>")
+  // Admin HTTP Basic Auth State (Stored in React Memory only)
   const [adminAuthHeader, setAdminAuthHeader] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  // Login Screen State
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
+  // Login Form Inputs
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
 
-  // Active Navigation Tab
-  const [activeTab, setActiveTab] = useState('analytics'); // 'analytics' | 'customers'
+  // Tab State ('CUSTOMERS' | 'ANALYTICS')
+  const [activeTab, setActiveTab] = useState('CUSTOMERS');
 
-  // Analytics State
-  const [analytics, setAnalytics] = useState(null);
-  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-
-  // Customers State
+  // Customer List & Analytics Data
   const [customers, setCustomers] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
+
+  // Loading States
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
 
   // Add Customer Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustEmail, setNewCustEmail] = useState('');
+  const [newAppName, setNewAppName] = useState('');
   const [newCustPackage, setNewCustPackage] = useState('');
   const [selectedJsonFile, setSelectedJsonFile] = useState(null);
   const [submittingCustomer, setSubmittingCustomer] = useState(false);
@@ -49,84 +51,69 @@ export default function App() {
       headers,
     });
 
-    if (response.status === 401 && adminAuthHeader) {
-      // Force return to login screen if credentials become invalid
+    if (response.status === 401 && isAuthenticated) {
+      setIsAuthenticated(false);
       setAdminAuthHeader('');
-      setErrorBanner('Session expired or credentials rejected. Please log in again.');
+      setLoginError('Session expired or admin credentials invalid. Please log in again.');
     }
 
     return response;
   };
 
-  // Submit Admin Login Form & Verify Credentials
-  const handleLogin = async (e) => {
+  // Admin Login Form Submit Handler
+  const handleAdminLoginSubmit = async (e) => {
     e.preventDefault();
     setLoginError('');
 
-    if (!username.trim() || !password) {
+    if (!loginUsername.trim() || !loginPassword) {
       setLoginError('Please enter both username and password.');
       return;
     }
 
     setLoggingIn(true);
 
+    const base64Auth = btoa(`${loginUsername.trim()}:${loginPassword}`);
+    const authHeaderValue = `Basic ${base64Auth}`;
+
     try {
-      const authHeaderValue = `Basic ${btoa(`${username.trim()}:${password}`)}`;
-      const res = await fetch(`${API_BASE}/admin/analytics`, {
-        headers: {
-          Authorization: authHeaderValue,
-        },
+      const res = await fetch(`${API_BASE}/customers`, {
+        headers: { Authorization: authHeaderValue },
       });
 
-      if (res.status === 200) {
-        const json = await res.json();
-        setAdminAuthHeader(authHeaderValue);
-        setAnalytics(json.data);
-        setPassword('');
-      } else if (res.status === 401) {
-        setLoginError('Incorrect username or password. Please try again.');
+      if (res.status === 401) {
+        setLoginError('Invalid admin username or password.');
+      } else if (!res.ok) {
+        setLoginError(`Server error HTTP ${res.status}. Please check backend logs.`);
       } else {
-        const json = await res.json().catch(() => ({}));
-        setLoginError(json.error || `Server returned unexpected status ${res.status}`);
+        const data = await res.json();
+        if (data.success) {
+          setAdminAuthHeader(authHeaderValue);
+          setIsAuthenticated(true);
+          setCustomers(data.data || []);
+          setLoginPassword('');
+        } else {
+          setLoginError(data.error || 'Authentication failed.');
+        }
       }
     } catch (err) {
-      setLoginError(`Cannot connect to backend API (${rawApiBaseUrl}). Please verify the backend server is running.`);
+      setLoginError(`Connection error: ${err.message}. Is the backend server running?`);
     } finally {
       setLoggingIn(false);
     }
   };
 
-  const handleLogout = () => {
+  const handleAdminLogout = () => {
+    setIsAuthenticated(false);
     setAdminAuthHeader('');
-    setUsername('');
-    setPassword('');
-    setAnalytics(null);
     setCustomers([]);
-  };
-
-  // Fetch Founder Analytics Metrics
-  const fetchAnalytics = async () => {
-    if (!adminAuthHeader) return;
-    setLoadingAnalytics(true);
-    setErrorBanner('');
-    try {
-      const res = await apiFetch('/admin/analytics');
-      const json = await res.json();
-      if (json.success) {
-        setAnalytics(json.data);
-      } else {
-        setErrorBanner(`Failed to load analytics: ${json.error}`);
-      }
-    } catch (err) {
-      setErrorBanner(`Cannot connect to ReviewForge backend API (${rawApiBaseUrl}). (${err.message})`);
-    } finally {
-      setLoadingAnalytics(false);
-    }
+    setAnalytics(null);
+    setLoginUsername('');
+    setLoginPassword('');
   };
 
   // Fetch Customers List
   const fetchCustomers = async () => {
-    if (!adminAuthHeader) return;
+    if (!isAuthenticated) return;
     setLoadingCustomers(true);
     setErrorBanner('');
     try {
@@ -135,26 +122,43 @@ export default function App() {
       if (json.success) {
         setCustomers(json.data || []);
       } else {
-        setErrorBanner(`Failed to load customers: ${json.error}`);
+        setErrorBanner(json.error || 'Failed to fetch customers.');
       }
     } catch (err) {
-      setErrorBanner(`Cannot connect to ReviewForge backend API (${rawApiBaseUrl}). (${err.message})`);
+      setErrorBanner(`API error: ${err.message}`);
     } finally {
       setLoadingCustomers(false);
     }
   };
 
-  useEffect(() => {
-    if (!adminAuthHeader) return;
-
-    if (activeTab === 'analytics') {
-      fetchAnalytics();
-    } else if (activeTab === 'customers') {
-      fetchCustomers();
+  // Fetch Founder Analytics
+  const fetchAnalytics = async () => {
+    if (!isAuthenticated) return;
+    setLoadingAnalytics(true);
+    setErrorBanner('');
+    try {
+      const res = await apiFetch('/admin/analytics');
+      const json = await res.json();
+      if (json.success) {
+        setAnalytics(json.data);
+      } else {
+        setErrorBanner(json.error || 'Failed to fetch analytics.');
+      }
+    } catch (err) {
+      setErrorBanner(`Analytics API error: ${err.message}`);
+    } finally {
+      setLoadingAnalytics(false);
     }
-  }, [activeTab, adminAuthHeader]);
+  };
 
-  // Action: Create New Customer
+  useEffect(() => {
+    if (isAuthenticated) {
+      if (activeTab === 'CUSTOMERS') fetchCustomers();
+      if (activeTab === 'ANALYTICS') fetchAnalytics();
+    }
+  }, [isAuthenticated, activeTab]);
+
+  // Handle Add Customer Submission
   const handleCreateCustomer = async (e) => {
     e.preventDefault();
     setModalError('');
@@ -163,16 +167,24 @@ export default function App() {
       setModalError('Customer Name is required.');
       return;
     }
+
     if (!newCustEmail.trim()) {
       setModalError('Customer Email is required.');
       return;
     }
-    if (!newCustPackage.trim()) {
-      setModalError('Package Name is required.');
+
+    if (!newAppName.trim()) {
+      setModalError('App Name is required.');
       return;
     }
+
+    if (!newCustPackage.trim()) {
+      setModalError('Android Package Name is required.');
+      return;
+    }
+
     if (!selectedJsonFile) {
-      setModalError('Please upload a Service Account JSON file.');
+      setModalError('Google Service Account JSON file is required.');
       return;
     }
 
@@ -203,6 +215,7 @@ export default function App() {
         body: JSON.stringify({
           name: newCustName.trim(),
           email: newCustEmail.trim(),
+          appName: newAppName.trim(),
           packageName: newCustPackage.trim(),
           serviceAccountJson: parsedJson,
         }),
@@ -214,6 +227,7 @@ export default function App() {
         setShowAddModal(false);
         setNewCustName('');
         setNewCustEmail('');
+        setNewAppName('');
         setNewCustPackage('');
         setSelectedJsonFile(null);
         setSuccessBanner(`Customer '${json.data.name}' created successfully (Status: Awaiting Verification).`);
@@ -228,273 +242,283 @@ export default function App() {
     }
   };
 
-  // ============================================================================
-  // UNAUTHENTICATED ADMIN LOGIN SCREEN
-  // ============================================================================
-  if (!adminAuthHeader) {
+  // 1. UNAUTHENTICATED ADMIN LOGIN SCREEN
+  if (!isAuthenticated) {
     return (
-      <div className="app-container">
-        <div className="login-wrapper">
-          <div className="login-card">
-            <div className="login-header">
-              <div className="login-icon">⚡</div>
-              <h2 className="login-title">ReviewForge Admin</h2>
-              <p className="login-subtitle">Enter founder credentials to access dashboard</p>
+      <div className="login-wrapper">
+        <div className="login-card">
+          <div className="login-header">
+            <div className="brand-badge">ReviewForge</div>
+            <h2>Admin Portal Log In</h2>
+            <p>Enter your ReviewForge administrator credentials to access management dashboard.</p>
+          </div>
+
+          {loginError && (
+            <div className="banner banner-error" style={{ marginBottom: '1.25rem' }}>
+              <span>⚠️ {loginError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleAdminLoginSubmit} className="login-form">
+            <div className="form-group">
+              <label htmlFor="admin-username">Admin Username</label>
+              <input
+                id="admin-username"
+                type="text"
+                className="form-input"
+                placeholder="Username"
+                value={loginUsername}
+                onChange={(e) => setLoginUsername(e.target.value)}
+                disabled={loggingIn}
+                required
+                autoFocus
+              />
             </div>
 
-            {loginError && (
-              <div className="banner banner-error" style={{ marginBottom: '1.25rem' }}>
-                <span>⚠️ {loginError}</span>
-              </div>
-            )}
+            <div className="form-group">
+              <label htmlFor="admin-password">Admin Password</label>
+              <input
+                id="admin-password"
+                type="password"
+                className="form-input"
+                placeholder="••••••••••••"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                disabled={loggingIn}
+                required
+              />
+            </div>
 
-            <form onSubmit={handleLogin} className="login-form">
-              <div className="form-group">
-                <label>Admin Username</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="admin"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  disabled={loggingIn}
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Admin Password</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  placeholder="••••••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={loggingIn}
-                  required
-                />
-              </div>
-
-              <button type="submit" className="btn btn-primary" disabled={loggingIn} style={{ width: '100%', marginTop: '0.5rem', padding: '0.75rem' }}>
-                {loggingIn ? 'Verifying Credentials...' : 'Log In to Dashboard'}
-              </button>
-            </form>
-          </div>
+            <button type="submit" className="btn btn-primary" disabled={loggingIn} style={{ width: '100%', marginTop: '0.5rem' }}>
+              {loggingIn ? 'Authenticating...' : 'Log In to Admin Dashboard'}
+            </button>
+          </form>
         </div>
       </div>
     );
   }
 
-  // ============================================================================
-  // AUTHENTICATED FOUNDER DASHBOARD
-  // ============================================================================
-  const hasNeedsAttention = analytics && (
-    (analytics.staleOnboarding && analytics.staleOnboarding.length > 0) ||
-    (analytics.inactiveCustomers && analytics.inactiveCustomers.length > 0)
-  );
-
+  // 2. AUTHENTICATED ADMIN DASHBOARD VIEW
   return (
     <div className="app-container">
-      {/* Header Bar */}
+      {/* Top Header */}
       <header className="header">
-        <div className="brand">
-          <div className="brand-icon">⚡</div>
-          <h1 className="brand-title">Review<span>Forge</span> Admin</h1>
+        <div className="header-brand">
+          <div className="brand-logo">RF</div>
+          <div>
+            <h1>ReviewForge</h1>
+            <p className="subtitle">Admin Management Portal</p>
+          </div>
         </div>
-        <nav className="nav-tabs">
-          <button
-            className={`nav-button ${activeTab === 'analytics' ? 'active' : ''}`}
-            onClick={() => setActiveTab('analytics')}
-          >
-            Analytics
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <button className="btn btn-secondary" onClick={() => setShowAddModal(true)}>
+            + Add New Customer
           </button>
-          <button
-            className={`nav-button ${activeTab === 'customers' ? 'active' : ''}`}
-            onClick={() => setActiveTab('customers')}
-          >
-            Customers
-          </button>
-          <button className="btn-logout" onClick={handleLogout} style={{ marginLeft: '0.5rem' }}>
+          <button className="btn btn-logout" onClick={handleAdminLogout}>
             Log Out
           </button>
-        </nav>
+        </div>
       </header>
 
-      {/* Global Notifications Banners */}
-      {errorBanner && (
-        <div className="banner banner-error">
-          <span>⚠️ {errorBanner}</span>
-          <button onClick={() => setErrorBanner('')} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
-        </div>
-      )}
+      {/* Main Tab Navigation */}
+      <div className="tab-navigation" style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', borderBottom: '1px solid var(--border)' }}>
+        <button
+          className={`tab-btn ${activeTab === 'CUSTOMERS' ? 'active' : ''}`}
+          onClick={() => setActiveTab('CUSTOMERS')}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: '0.75rem 1.25rem',
+            color: activeTab === 'CUSTOMERS' ? 'var(--gold)' : 'var(--text-muted)',
+            borderBottom: activeTab === 'CUSTOMERS' ? '2px solid var(--gold)' : '2px solid transparent',
+            fontWeight: '600',
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+          }}
+        >
+          Customers ({customers.length})
+        </button>
 
+        <button
+          className={`tab-btn ${activeTab === 'ANALYTICS' ? 'active' : ''}`}
+          onClick={() => setActiveTab('ANALYTICS')}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: '0.75rem 1.25rem',
+            color: activeTab === 'ANALYTICS' ? 'var(--gold)' : 'var(--text-muted)',
+            borderBottom: activeTab === 'ANALYTICS' ? '2px solid var(--gold)' : '2px solid transparent',
+            fontWeight: '600',
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+          }}
+        >
+          📊 Founder Analytics
+        </button>
+      </div>
+
+      {/* Banners */}
       {successBanner && (
-        <div className="banner banner-success">
+        <div className="banner banner-success" style={{ marginBottom: '1.5rem' }}>
           <span>✓ {successBanner}</span>
-          <button onClick={() => setSuccessBanner('')} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+          <button className="banner-close" onClick={() => setSuccessBanner('')}>✕</button>
         </div>
       )}
 
-      {/* TAB 1: FOUNDER ANALYTICS (DEFAULT) */}
-      {activeTab === 'analytics' && (
-        <main>
-          <div className="section-title">
-            <span>Founder Overview & Platform Performance</span>
-            <button className="refresh-btn" onClick={fetchAnalytics} disabled={loadingAnalytics}>
-              {loadingAnalytics ? 'Refreshing...' : '↻ Refresh Analytics'}
-            </button>
-          </div>
+      {errorBanner && (
+        <div className="banner banner-error" style={{ marginBottom: '1.5rem' }}>
+          <span>⚠️ {errorBanner}</span>
+          <button className="banner-close" onClick={() => setErrorBanner('')}>✕</button>
+        </div>
+      )}
 
+      {/* TAB 1: ANALYTICS DASHBOARD */}
+      {activeTab === 'ANALYTICS' && (
+        <main className="main-content">
           {loadingAnalytics ? (
-            <div className="loading-state">
-              <p>Loading analytics from backend...</p>
+            <div className="empty-state">
+              <p>Loading analytics data...</p>
             </div>
           ) : !analytics ? (
             <div className="empty-state">
-              <div className="empty-state-icon">📊</div>
-              <h3>No Analytics Data Available</h3>
-              <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>Verify backend API connection.</p>
+              <p>No analytics data available.</p>
             </div>
           ) : (
-            <div>
-              {/* Top Stat Cards Grid */}
-              <div className="stats-grid">
+            <div className="analytics-grid" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+              {/* Stat Cards Grid */}
+              <div className="stat-cards-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
                 <div className="stat-card">
-                  <div className="stat-header">Total Customers</div>
-                  <div className="stat-number">{analytics.totalCustomers}</div>
-                  <div className="stat-subtitle">
-                    {analytics.customersByStatus?.ACTIVE || 0} Active • {analytics.customersByStatus?.AWAITING_VERIFICATION || 0} Awaiting
+                  <div className="stat-card-label">Total Customers</div>
+                  <div className="stat-card-value">{analytics.totalCustomers}</div>
+                  <div className="stat-card-sub">
+                    Active: {analytics.customersByStatus?.ACTIVE || 0} | Awaiting: {analytics.customersByStatus?.AWAITING_VERIFICATION || 0}
                   </div>
                 </div>
 
                 <div className="stat-card">
-                  <div className="stat-header">Total Reviews Processed</div>
-                  <div className="stat-number">{analytics.totalReviewsProcessed}</div>
-                  <div className="stat-subtitle">
-                    {analytics.reviewsByStatus?.posted || 0} Posted • {analytics.reviewsByStatus?.rejected || 0} Rejected
+                  <div className="stat-card-label">Auto-Post Adoption</div>
+                  <div className="stat-card-value" style={{ color: 'var(--mint)' }}>
+                    {analytics.autoPostAdoption?.enabled || 0}
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)' }}> / {analytics.customersByStatus?.ACTIVE || 0}</span>
                   </div>
+                  <div className="stat-card-sub">Enabled for active customers</div>
                 </div>
 
                 <div className="stat-card">
-                  <div className="stat-header">Approval Rate</div>
-                  <div className="stat-number">
+                  <div className="stat-card-label">Approval Rate</div>
+                  <div className="stat-card-value" style={{ color: 'var(--gold)' }}>
                     {analytics.approvalRate !== null ? `${analytics.approvalRate}%` : 'N/A'}
                   </div>
-                  <div className="stat-subtitle">
-                    {analytics.editRate !== null ? `${analytics.editRate}% AI Draft Edit Rate` : 'Posted vs Decided'}
-                  </div>
+                  <div className="stat-card-sub">Posted vs Rejected</div>
                 </div>
 
                 <div className="stat-card">
-                  <div className="stat-header">Auto-Post Adoption</div>
-                  <div className="stat-number">
-                    {analytics.autoPostAdoption
-                      ? `${analytics.autoPostAdoption.enabled} / ${analytics.autoPostAdoption.enabled + analytics.autoPostAdoption.disabled}`
-                      : '0 / 0'}
+                  <div className="stat-card-label">Draft Edit Rate</div>
+                  <div className="stat-card-value">
+                    {analytics.editRate !== null ? `${analytics.editRate}%` : 'N/A'}
                   </div>
-                  <div className="stat-subtitle">
-                    {analytics.autoPostAdoption && (analytics.autoPostAdoption.enabled + analytics.autoPostAdoption.disabled) > 0
-                      ? `${Math.round((analytics.autoPostAdoption.enabled / (analytics.autoPostAdoption.enabled + analytics.autoPostAdoption.disabled)) * 100)}% of Active Customers`
-                      : 'Active Customer Adoption'}
-                  </div>
+                  <div className="stat-card-sub">Modified before posting</div>
                 </div>
               </div>
 
-              {/* Needs Attention Alert List */}
-              {hasNeedsAttention && (
-                <div className="attention-section">
-                  <h3 className="attention-title">
-                    <span>⚠️</span> Needs Attention & Founder Action
-                  </h3>
-                  <div className="attention-list">
-                    {analytics.staleOnboarding?.map((item) => (
-                      <div key={item.id} className="attention-item">
-                        <span className="attention-tag stale">Stale Onboarding</span>
-                        <span>
-                          <strong>{item.name}</strong> ({item.packageName}) has been awaiting setup verification for <strong>{item.daysAwaiting} days</strong> ({item.email})
-                        </span>
-                      </div>
-                    ))}
+              {/* Founder Follow-up Lists */}
+              {((analytics.staleOnboarding && analytics.staleOnboarding.length > 0) ||
+                (analytics.inactiveCustomers && analytics.inactiveCustomers.length > 0)) && (
+                <div className="followup-section" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <h3 style={{ fontSize: '1.1rem', color: 'var(--text)' }}>Founder Action Items</h3>
 
-                    {analytics.inactiveCustomers?.map((item) => (
-                      <div key={item.id} className="attention-item">
-                        <span className="attention-tag inactive">Inactivity Risk</span>
-                        <span>
-                          <strong>{item.name}</strong> ({item.packageName}) is Active but has <strong>0 posted reviews</strong> in the last 7 days ({item.email})
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  {analytics.staleOnboarding && analytics.staleOnboarding.length > 0 && (
+                    <div className="banner banner-error" style={{ display: 'block' }}>
+                      <strong style={{ display: 'block', marginBottom: '0.25rem' }}>⏳ Stale Onboarding (&gt;3 Days Awaiting Setup):</strong>
+                      <ul style={{ margin: '0.25rem 0 0 1.25rem', padding: 0 }}>
+                        {analytics.staleOnboarding.map((item) => (
+                          <li key={item.id}>
+                            <strong>{item.name}</strong> ({item.appName || item.packageName}) has been awaiting setup verification for <strong>{item.daysAwaiting} days</strong> ({item.email})
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {analytics.inactiveCustomers && analytics.inactiveCustomers.length > 0 && (
+                    <div className="banner banner-error" style={{ display: 'block', backgroundColor: 'rgba(232, 169, 59, 0.15)', borderColor: 'rgba(232, 169, 59, 0.4)', color: 'var(--gold)' }}>
+                      <strong style={{ display: 'block', marginBottom: '0.25rem' }}>⚠️ Inactive Customers (0 Replies Posted in Last 7 Days):</strong>
+                      <ul style={{ margin: '0.25rem 0 0 1.25rem', padding: 0 }}>
+                        {analytics.inactiveCustomers.map((item) => (
+                          <li key={item.id}>
+                            <strong>{item.name}</strong> ({item.appName || item.packageName}) is Active but has <strong>0 posted reviews</strong> in the last 7 days ({item.email})
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Per-Customer Breakdown Table */}
-              <div className="section-title" style={{ fontSize: '1.1rem', marginTop: '1rem' }}>
-                <span>Per-Customer Activity Breakdown</span>
-              </div>
-
-              {analytics.reviewsPerCustomer?.length === 0 ? (
-                <div className="empty-state">
-                  <p>No customer activity data found.</p>
-                </div>
-              ) : (
-                <div className="table-container">
-                  <table className="analytics-table">
-                    <thead>
-                      <tr>
-                        <th>Customer Name</th>
-                        <th>Package Name</th>
-                        <th>Total Reviews</th>
-                        <th>Posted</th>
-                        <th>Pending</th>
-                        <th>Rejected</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {analytics.reviewsPerCustomer?.map((cust) => (
-                        <tr key={cust.customerId}>
-                          <td style={{ fontWeight: 600 }}>{cust.customerName}</td>
-                          <td style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{cust.packageName}</td>
-                          <td style={{ fontWeight: 600 }}>{cust.totalReviews}</td>
-                          <td style={{ color: 'var(--mint)' }}>{cust.posted}</td>
-                          <td style={{ color: 'var(--gold)' }}>{cust.pending}</td>
-                          <td style={{ color: 'var(--text-muted)' }}>{cust.rejected}</td>
+              {/* Per-Customer Activity Breakdown Table */}
+              <div>
+                <h3 style={{ fontSize: '1.1rem', color: 'var(--text)', marginBottom: '0.75rem' }}>Customer Review Activity Breakdown</h3>
+                {!analytics.reviewsPerCustomer || analytics.reviewsPerCustomer.length === 0 ? (
+                  <div className="empty-state">
+                    <p>No customer review metrics available.</p>
+                  </div>
+                ) : (
+                  <div className="table-container">
+                    <table className="analytics-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                          <th style={{ padding: '0.75rem' }}>Customer Name</th>
+                          <th style={{ padding: '0.75rem' }}>App / Package Name</th>
+                          <th style={{ padding: '0.75rem' }}>Total Reviews</th>
+                          <th style={{ padding: '0.75rem' }}>Posted</th>
+                          <th style={{ padding: '0.75rem' }}>Pending</th>
+                          <th style={{ padding: '0.75rem' }}>Rejected</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {analytics.reviewsPerCustomer.map((cust) => (
+                          <tr key={cust.customerId} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '0.75rem', fontWeight: 600 }}>{cust.customerName}</td>
+                            <td style={{ padding: '0.75rem' }}>
+                              <div style={{ fontWeight: 600, color: 'var(--text)' }}>{cust.appName || cust.packageName}</div>
+                              <div style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-muted)' }}>{cust.packageName}</div>
+                            </td>
+                            <td style={{ padding: '0.75rem', fontWeight: 600 }}>{cust.totalReviews}</td>
+                            <td style={{ padding: '0.75rem', color: 'var(--mint)' }}>{cust.posted}</td>
+                            <td style={{ padding: '0.75rem', color: 'var(--gold)' }}>{cust.pending}</td>
+                            <td style={{ padding: '0.75rem', color: 'var(--text-muted)' }}>{cust.rejected}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </main>
       )}
 
-      {/* TAB 2: CUSTOMERS (READ-ONLY AUTO-POST BADGE + ADD CUSTOMER) */}
-      {activeTab === 'customers' && (
-        <main>
-          <div className="section-title">
-            <span>Customer Directory & Credentials</span>
-            <div className="header-actions">
-              <button className="btn-add-customer" onClick={() => { setModalError(''); setShowAddModal(true); }}>
-                + Add Customer
-              </button>
-              <button className="refresh-btn" onClick={fetchCustomers} disabled={loadingCustomers}>
-                {loadingCustomers ? 'Refreshing...' : '↻ Refresh Customers'}
-              </button>
-            </div>
+      {/* TAB 2: CUSTOMERS MANAGEMENT VIEW */}
+      {activeTab === 'CUSTOMERS' && (
+        <main className="main-content">
+          <div className="section-header">
+            <h2>Configured Customers ({customers.length})</h2>
+            <button className="btn btn-secondary" onClick={fetchCustomers} disabled={loadingCustomers}>
+              {loadingCustomers ? 'Refreshing...' : '↻ Refresh'}
+            </button>
           </div>
 
           {loadingCustomers ? (
-            <div className="loading-state">
-              <p>Loading customers from backend...</p>
+            <div className="empty-state">
+              <p>Loading customers...</p>
             </div>
           ) : customers.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-state-icon">👥</div>
-              <h3>No active customers found</h3>
-              <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>Click "+ Add Customer" above to onboard a new customer.</p>
+              <div className="empty-state-icon">📱</div>
+              <h3>No Customers Added Yet</h3>
+              <p>Click "Add New Customer" above to configure your first Google Play app.</p>
             </div>
           ) : (
             <div className="customers-list">
@@ -512,7 +536,14 @@ export default function App() {
                             {isAwaiting ? 'Awaiting Verification' : 'Active'}
                           </span>
                         </h3>
-                        <p>{customer.packageName} • {customer.email}</p>
+                        {customer.appName && (
+                          <div style={{ fontWeight: 600, fontSize: '14.5px', color: 'var(--text)', marginTop: '2px' }}>
+                            {customer.appName}
+                          </div>
+                        )}
+                        <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {customer.packageName} • {customer.email}
+                        </p>
                       </div>
                     </div>
 
@@ -570,6 +601,18 @@ export default function App() {
               </div>
 
               <div className="form-group">
+                <label>App Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. AI Coding Assistant"
+                  value={newAppName}
+                  onChange={(e) => setNewAppName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
                 <label>Android Package Name</label>
                 <input
                   type="text"
@@ -606,7 +649,7 @@ export default function App() {
                   className="btn btn-primary"
                   disabled={submittingCustomer}
                 >
-                  {submittingCustomer ? 'Encrypting & Saving...' : 'Create Customer'}
+                  {submittingCustomer ? 'Creating Customer...' : 'Create Customer'}
                 </button>
               </div>
             </form>

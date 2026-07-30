@@ -217,6 +217,7 @@ router.get('/admin/analytics', requireAdminBasicAuth, async (req, res) => {
       return {
         customerId: c.id,
         customerName: c.name || 'Unnamed',
+        appName: c.appName || '',
         packageName: c.packageName || 'Unknown',
         totalReviews: custRev.length,
         posted: custRev.filter((r) => r.status === 'posted').length,
@@ -238,6 +239,7 @@ router.get('/admin/analytics', requireAdminBasicAuth, async (req, res) => {
           id: c.id,
           name: c.name,
           email: c.email,
+          appName: c.appName || '',
           packageName: c.packageName,
           daysAwaiting,
           createdAt: c.createdAtDate,
@@ -260,6 +262,7 @@ router.get('/admin/analytics', requireAdminBasicAuth, async (req, res) => {
         id: c.id,
         name: c.name,
         email: c.email,
+        appName: c.appName || '',
         packageName: c.packageName,
       }));
 
@@ -314,6 +317,7 @@ router.get('/customer/me', verifyCustomerAuth, async (req, res) => {
         id: fullCustomer.id,
         name: fullCustomer.name,
         email: fullCustomer.email,
+        appName: fullCustomer.appName || '',
         packageName: fullCustomer.packageName,
         autoPostEnabled: Boolean(fullCustomer.autoPostEnabled),
         onboardingStatus: fullCustomer.onboardingStatus || 'AWAITING_VERIFICATION',
@@ -822,6 +826,7 @@ router.get('/customers/by-email', async (req, res) => {
       exists: true,
       data: {
         onboardingStatus: customer.onboardingStatus || 'AWAITING_VERIFICATION',
+        appName: customer.appName || '',
         packageName: customer.packageName,
         hasAuthAccount,
       },
@@ -838,10 +843,10 @@ router.get('/customers/by-email', async (req, res) => {
  * POST /api/customers/create
  * Creates a new customer record with encrypted service account credentials and AWAITING_VERIFICATION status.
  * Protected by HTTP Basic Auth.
- * Payload: { "name": "...", "email": "...", "packageName": "...", "serviceAccountJson": { ... } }
+ * Payload: { "name": "...", "email": "...", "appName": "...", "packageName": "...", "serviceAccountJson": { ... } }
  */
 router.post('/customers/create', requireAdminBasicAuth, async (req, res) => {
-  const { name, email, packageName, serviceAccountJson } = req.body || {};
+  const { name, email, appName, packageName, serviceAccountJson } = req.body || {};
 
   // 1. Validate required fields
   if (!name || typeof name !== 'string' || !name.trim()) {
@@ -850,6 +855,10 @@ router.post('/customers/create', requireAdminBasicAuth, async (req, res) => {
 
   if (!email || typeof email !== 'string' || !email.trim()) {
     return res.status(400).json({ success: false, error: 'Customer Email is required.' });
+  }
+
+  if (!appName || typeof appName !== 'string' || !appName.trim()) {
+    return res.status(400).json({ success: false, error: 'App Name is required.' });
   }
 
   if (!packageName || typeof packageName !== 'string' || !packageName.trim()) {
@@ -895,6 +904,7 @@ router.post('/customers/create', requireAdminBasicAuth, async (req, res) => {
     const newCustomer = await addCustomer({
       name: name.trim(),
       email: email.trim(),
+      appName: appName.trim(),
       packageName: packageName.trim(),
       serviceAccountJson: parsedJson,
       onboardingStatus: 'AWAITING_VERIFICATION',
@@ -906,6 +916,7 @@ router.post('/customers/create', requireAdminBasicAuth, async (req, res) => {
         id: newCustomer.id,
         name: newCustomer.name,
         email: newCustomer.email,
+        appName: newCustomer.appName,
         packageName: newCustomer.packageName,
         onboardingStatus: newCustomer.onboardingStatus,
       },

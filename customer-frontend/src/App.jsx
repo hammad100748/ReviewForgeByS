@@ -630,9 +630,14 @@ export default function App() {
               <span className="nav__brand-mark"></span> ReviewForge
             </a>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <span className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                {customerProfile?.email || currentUser.email}
-              </span>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--text)' }}>
+                  {customerProfile?.appName || customerProfile?.name}
+                </div>
+                <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  {customerProfile?.packageName || customerProfile?.email}
+                </div>
+              </div>
               <button className="btn-ghost" onClick={handleSignOut} style={{ padding: '8px 16px', fontSize: '13.5px' }}>
                 Sign Out
               </button>
@@ -663,7 +668,7 @@ export default function App() {
                 </span>
                 <h2 style={{ fontSize: '24px', marginBottom: '8px' }}>Invite Service Account</h2>
                 <p style={{ color: 'var(--text-muted)', fontSize: '14.5px' }}>
-                  Grant ReviewForge permission to reply to reviews for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong>
+                  Grant ReviewForge permission to reply to reviews for <strong style={{ color: 'var(--text)' }}>{customerProfile?.appName || customerProfile?.packageName}</strong> <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>({customerProfile?.packageName})</span>
                 </p>
               </div>
 
@@ -688,7 +693,7 @@ export default function App() {
                 <ol style={{ paddingLeft: '20px', fontSize: '14px', lineHeight: '1.7', color: 'var(--text-muted)' }}>
                   <li>Open <strong>Google Play Console</strong> and select <strong>Users and Permissions</strong></li>
                   <li>Click <strong>Invite new users</strong> and paste the email address above</li>
-                  <li>Under App Permissions, grant permission for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong></li>
+                  <li>Under App Permissions, grant permission for <strong style={{ color: 'var(--text)' }}>{customerProfile?.appName || customerProfile?.packageName}</strong> <span style={{ color: 'var(--text-muted)' }}>({customerProfile?.packageName})</span></li>
                   <li>Enable the <strong style={{ color: 'var(--text)' }}>"Reply to reviews"</strong> permission and click Send Invite</li>
                   <li>Return here and click <strong>Verify Connection</strong> below</li>
                 </ol>
@@ -768,7 +773,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* REQUIREMENT 8: MAIN DASHBOARD TABS NAVIGATION */}
+              {/* MAIN DASHBOARD TABS NAVIGATION */}
               <div className="dashboard-tabs">
                 <button
                   className={`dashboard-tab-btn ${activeTab === 'PENDING' ? 'active' : ''}`}
@@ -899,7 +904,7 @@ export default function App() {
                       <div style={{ fontSize: '36px', marginBottom: '12px' }}>🎉</div>
                       <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>All caught up!</h3>
                       <p style={{ color: 'var(--text-muted)', fontSize: '14.5px' }}>
-                        No reviews are currently awaiting approval for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong>.
+                        No reviews are currently awaiting approval for <strong style={{ color: 'var(--text)' }}>{customerProfile?.appName || customerProfile?.packageName}</strong> <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>({customerProfile?.packageName})</span>.
                       </p>
                     </div>
                   ) : sortedReviews.length === 0 ? (
@@ -1053,7 +1058,7 @@ export default function App() {
                       <div style={{ fontSize: '36px', marginBottom: '12px' }}>📜</div>
                       <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>No review history yet</h3>
                       <p style={{ color: 'var(--text-muted)', fontSize: '14.5px' }}>
-                        Posted or rejected reviews for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong> will appear here.
+                        Posted or rejected reviews for <strong style={{ color: 'var(--text)' }}>{customerProfile?.appName || customerProfile?.packageName}</strong> <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>({customerProfile?.packageName})</span> will appear here.
                       </p>
                     </div>
                   ) : (
