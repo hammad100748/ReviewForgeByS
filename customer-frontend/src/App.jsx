@@ -30,6 +30,7 @@ export default function App() {
   // Flow State
   const [step, setStep] = useState(1);
   const [subStep, setSubStep] = useState(null);
+  const [hasAuthAccount, setHasAuthAccount] = useState(false);
 
   // UI State
   const [checking, setChecking] = useState(false);
@@ -159,11 +160,9 @@ export default function App() {
         setCustomerProfile(prev => prev ? { ...prev, autoPostEnabled: nextState } : prev);
         setDashboardSuccess(`Auto-post mode ${nextState ? 'ENABLED' : 'DISABLED'} for your account.`);
       } else {
-        // Revert toggle state visually on failure
         setDashboardError(`Failed to update auto-post mode: ${json.error}`);
       }
     } catch (err) {
-      // Revert toggle state visually on failure
       setDashboardError(`Failed to update auto-post mode: ${err.message}`);
     } finally {
       setTogglingAutoPost(false);
@@ -295,7 +294,7 @@ export default function App() {
     }
   };
 
-  // Step 1: Check Email Pre-Provisioning
+  // Step 1: Check Email Pre-Provisioning & Auth Account Status
   const handleEmailContinue = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -315,8 +314,10 @@ export default function App() {
       setStep(2);
       if (!checkData.success || checkData.exists === false) {
         setSubStep('NOT_INVITED');
+        setHasAuthAccount(false);
       } else {
         setSubStep('PROVISIONED');
+        setHasAuthAccount(Boolean(checkData.data?.hasAuthAccount));
       }
     } catch (err) {
       console.error('Email verification error:', err);
@@ -326,7 +327,7 @@ export default function App() {
     }
   };
 
-  // Step 2: Handle Password Submit
+  // Step 2: Handle Password Submit (Deterministic Path Driven by Backend hasAuthAccount)
   const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -340,12 +341,13 @@ export default function App() {
     setSubmitting(true);
 
     try {
-      await signInWithEmailAndPassword(auth, trimmedEmail, password);
-    } catch (err) {
-      if (err.code === 'auth/user-not-found') {
+      if (hasAuthAccount) {
+        // Returning User Path -> Log In
+        await signInWithEmailAndPassword(auth, trimmedEmail, password);
+      } else {
+        // First-Time Setup Path -> Create Password & Account
         try {
           await createUserWithEmailAndPassword(auth, trimmedEmail, password);
-          return;
         } catch (createErr) {
           if (createErr.code === 'auth/weak-password') {
             setErrorMsg('Password must be at least 6 characters long.');
@@ -355,13 +357,16 @@ export default function App() {
           return;
         }
       }
-
+    } catch (err) {
       if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         setErrorMsg('Incorrect password, please try again.');
         return;
       }
-
-      setErrorMsg('Something went wrong, please try again.');
+      if (err.code === 'auth/weak-password') {
+        setErrorMsg('Password must be at least 6 characters long.');
+        return;
+      }
+      setErrorMsg(err.message || 'Something went wrong, please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -370,6 +375,7 @@ export default function App() {
   const resetFlow = () => {
     setStep(1);
     setSubStep(null);
+    setHasAuthAccount(false);
     setPassword('');
     setErrorMsg('');
   };
@@ -448,171 +454,144 @@ export default function App() {
               </div>
 
               {/* Service Account Email Copy Box */}
-              <div className="form-group" style={{ marginBottom: '24px' }}>
-                <label>Your Dedicated Service Account Email</label>
-                <div className="service-email-box">
-                  <span className="service-email-text">{customerProfile?.serviceAccountEmail || 'Loading...'}</span>
-                  <button className="btn-copy" onClick={handleCopyEmail}>
-                    {copied ? 'Copied ✓' : 'Copy Email'}
+              <div className="key-box" style={{ marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Google Play Service Account Email
+                  </label>
+                  <button className="btn-ghost" onClick={handleCopyEmail} style={{ padding: '4px 10px', fontSize: '12px' }}>
+                    {copied ? '✓ Copied' : 'Copy Email'}
                   </button>
                 </div>
-              </div>
-
-              {/* Numbered Setup Instructions */}
-              <div className="instruction-steps">
-                <div className="instruction-step">
-                  <span className="step-num">1</span>
-                  <div className="step-text">
-                    Open your <strong><a href="https://play.google.com/console" target="_blank" rel="noreferrer">Google Play Console</a></strong>.
-                  </div>
-                </div>
-
-                <div className="instruction-step">
-                  <span className="step-num">2</span>
-                  <div className="step-text">
-                    Navigate to <strong>Users and permissions</strong> → click <strong>Invite new users</strong>.
-                  </div>
-                </div>
-
-                <div className="instruction-step">
-                  <span className="step-num">3</span>
-                  <div className="step-text">
-                    Paste the Service Account email copied above into the email address field.
-                  </div>
-                </div>
-
-                <div className="instruction-step">
-                  <span className="step-num">4</span>
-                  <div className="step-text">
-                    Under App permissions, select <strong>{customerProfile?.packageName}</strong> and grant <strong>"Reply to reviews"</strong> permission only.
-                  </div>
-                </div>
-
-                <div className="instruction-step">
-                  <span className="step-num">5</span>
-                  <div className="step-text">
-                    Click <strong>Invite user</strong> and send the invitation.
-                  </div>
+                <div className="mono" style={{ fontSize: '13.5px', wordBreak: 'break-all', color: 'var(--gold)', background: 'rgba(0,0,0,0.3)', padding: '10px 14px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                  {customerProfile?.serviceAccountEmail || 'Loading service account email...'}
                 </div>
               </div>
 
-              {/* Verification Error Banner */}
+              {/* Onboarding Instructions List */}
+              <div style={{ background: 'var(--bg-panel-2)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '24px' }}>
+                <h4 style={{ fontSize: '14px', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Instructions</h4>
+                <ol style={{ paddingLeft: '20px', fontSize: '14px', lineHeight: '1.7', color: 'var(--text-muted)' }}>
+                  <li>Open <strong>Google Play Console</strong> and select <strong>Users and Permissions</strong></li>
+                  <li>Click <strong>Invite new users</strong> and paste the email address above</li>
+                  <li>Under App Permissions, grant permission for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong></li>
+                  <li>Enable the <strong style={{ color: 'var(--text)' }}>"Reply to reviews"</strong> permission and click Send Invite</li>
+                  <li>Return here and click <strong>Verify Connection</strong> below</li>
+                </ol>
+              </div>
+
               {verifyingError && (
-                <div className="alert alert-error" style={{ marginBottom: '16px' }}>
-                  <strong>Verification Failed</strong>
-                  <p style={{ marginTop: '4px', fontSize: '13px' }}>{verifyingError}</p>
+                <div className="alert alert-error" style={{ marginBottom: '20px' }}>
+                  ⚠️ {verifyingError}
                 </div>
               )}
 
-              {/* Action Button */}
               <button
                 className="btn-primary"
                 onClick={handleVerifyConnection}
                 disabled={verifying}
+                style={{ width: '100%', padding: '12px', fontSize: '15px' }}
               >
-                {verifying ? 'Verifying Connection...' : "I've Done This — Verify Connection"}
+                {verifying ? 'Testing Play Console Permission...' : 'Verify Connection & Activate'}
               </button>
-
-              {verifyingError && (
-                <p className="retry-hint">
-                  Double-check the invite was sent to the exact email above with "Reply to reviews" permission.
-                </p>
-              )}
             </div>
           ) : isActive ? (
-            /* STATE B: ACTIVE CUSTOMER DASHBOARD */
-            <div className="active-dashboard-container">
-              {/* Connected Settings & Read-Only Info Banner */}
-              <div className="settings-info-banner">
-                <div className="settings-meta-item">
-                  <span className="settings-meta-label">Connected App Package</span>
-                  <span className="settings-meta-value gold">{customerProfile?.packageName}</span>
-                </div>
-                <div className="settings-meta-item">
-                  <span className="settings-meta-label">Service Account Email</span>
-                  <span className="settings-meta-value">{customerProfile?.serviceAccountEmail}</span>
-                </div>
-                <div className="settings-meta-item">
-                  <span className="settings-meta-label">Status</span>
-                  <span className="status-chip" style={{ margin: 0 }}>
-                    <span className="nav__brand-mark" style={{ width: '6px', height: '6px' }}></span> ACTIVE & CONNECTED
-                  </span>
-                </div>
-              </div>
+            /* STATE B: ACTIVE (Live Review Approval Dashboard with Auto-Post Toggle) */
+            <div style={{ width: '100%' }}>
 
-              {/* Auto-Post Toggle Card */}
-              <div className="autopost-card">
-                <div className="autopost-info">
-                  <h3 className="autopost-title">
-                    ⚡ Auto-Post Replies
-                  </h3>
-                  <p className="autopost-desc">
-                    When enabled, AI-generated replies are posted automatically without requiring your approval. When disabled, you review and approve every reply before it's posted.
-                  </p>
-                </div>
+              {/* Self-Serve Auto-Post Toggle Control Box */}
+              <div className="dashboard-card" style={{ marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+                      <h3 style={{ fontSize: '18px', margin: 0 }}>Auto-Post Mode</h3>
+                      <span className={`status-chip ${isAutoPost ? 'active' : 'awaiting'}`}>
+                        {isAutoPost ? 'ACTIVE (AUTOMATIC)' : 'DISABLED (MANUAL APPROVAL)'}
+                      </span>
+                    </div>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', margin: 0 }}>
+                      {isAutoPost
+                        ? 'AI-generated replies are posted immediately to Google Play Store during review detection.'
+                        : 'Review drafts require your manual review and approval before being posted to Google Play.'}
+                    </p>
+                  </div>
 
-                <div className="toggle-wrapper">
-                  <span className={`toggle-status ${isAutoPost ? 'enabled' : 'disabled'}`}>
-                    {togglingAutoPost ? 'Saving...' : (isAutoPost ? 'Enabled' : 'Disabled')}
-                  </span>
-                  <label className="switch">
+                  <label className="toggle-switch" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={isAutoPost}
-                      disabled={togglingAutoPost}
                       onChange={handleToggleAutoPost}
+                      disabled={togglingAutoPost}
+                      style={{ display: 'none' }}
                     />
-                    <span className="slider"></span>
+                    <span
+                      style={{
+                        position: 'relative',
+                        width: '46px',
+                        height: '24px',
+                        backgroundColor: isAutoPost ? 'var(--gold)' : 'var(--bg-panel-2)',
+                        borderRadius: '24px',
+                        transition: 'background-color 0.2s',
+                        display: 'inline-block',
+                        border: '1px solid var(--border)',
+                        opacity: togglingAutoPost ? 0.6 : 1,
+                      }}
+                    >
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: '2px',
+                          left: isAutoPost ? '24px' : '2px',
+                          width: '18px',
+                          height: '18px',
+                          backgroundColor: isAutoPost ? '#0f1115' : 'var(--text-muted)',
+                          borderRadius: '50%',
+                          transition: 'left 0.2s',
+                        }}
+                      />
+                    </span>
                   </label>
                 </div>
               </div>
 
-              {/* Notifications Banners */}
-              {dashboardError && (
-                <div className="alert alert-error">
-                  <span>⚠️ {dashboardError}</span>
-                  <button onClick={() => setDashboardError('')} style={{ background: 'none', border: 'none', color: 'inherit', float: 'right', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
-                </div>
-              )}
-
-              {dashboardSuccess && (
-                <div className="alert alert-success">
-                  <span>✓ {dashboardSuccess}</span>
-                  <button onClick={() => setDashboardSuccess('')} style={{ background: 'none', border: 'none', color: 'inherit', float: 'right', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
-                </div>
-              )}
-
-              {/* Persistent Auto-Post Enabled Informational Banner */}
-              {isAutoPost && (
-                <div className="autopost-banner-note">
-                  ⚡ <strong>Auto-post is on</strong> — new reviews will be replied to automatically. Manually approved reviews below are from before you enabled this.
-                </div>
-              )}
-
-              {/* Header Action Bar */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-                <h2 style={{ fontSize: '24px', color: 'var(--text)' }}>
+              {/* Pending Reviews Section Header */}
+              <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ fontSize: '18px' }}>
                   Pending Review Approvals ({reviews.length})
-                </h2>
-                <button className="btn-ghost" onClick={() => fetchCustomerReviews(currentUser)} disabled={loadingReviews} style={{ padding: '8px 16px', fontSize: '13.5px' }}>
-                  {loadingReviews ? 'Refreshing...' : '↻ Refresh Reviews'}
+                </h3>
+                <button className="btn-ghost" onClick={() => fetchCustomerReviews(currentUser)} disabled={loadingReviews} style={{ padding: '6px 12px', fontSize: '13px' }}>
+                  {loadingReviews ? 'Refreshing...' : '↻ Refresh Queue'}
                 </button>
               </div>
 
-              {/* Reviews List / Cards Grid */}
+              {dashboardSuccess && (
+                <div className="alert alert-success" style={{ marginBottom: '20px' }}>
+                  ✓ {dashboardSuccess}
+                </div>
+              )}
+
+              {dashboardError && (
+                <div className="alert alert-error" style={{ marginBottom: '20px' }}>
+                  ⚠️ {dashboardError}
+                </div>
+              )}
+
+              {/* Reviews List / Empty Queue State */}
               {loadingReviews ? (
-                <div className="empty-state">
-                  <p className="mono">Loading your pending reviews...</p>
+                <div className="dashboard-card" style={{ textAlign: 'center' }}>
+                  <p className="mono" style={{ color: 'var(--text-muted)' }}>Loading pending reviews...</p>
                 </div>
               ) : reviews.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-state-icon">🎉</div>
-                  <h3>No pending reviews right now</h3>
-                  <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>We'll notify you when new ones come in.</p>
+                <div className="dashboard-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+                  <div style={{ fontSize: '36px', marginBottom: '12px' }}>🎉</div>
+                  <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>All caught up!</h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '14.5px' }}>
+                    No reviews are currently awaiting approval for <strong style={{ color: 'var(--text)' }}>{customerProfile?.packageName}</strong>.
+                  </p>
                 </div>
               ) : (
-                <div className="cards-grid">
-                  {reviews.map(review => {
+                <div className="reviews-grid" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {reviews.map((review) => {
                     const isProcessing = processingDocs[review.id];
                     const currentText = editedTexts[review.id] ?? (review.draftReply || '');
                     const charCount = currentText.length;
@@ -620,33 +599,48 @@ export default function App() {
 
                     return (
                       <div key={review.id} className="review-card">
-                        <div className="card-header">
-                          <div className="author-info">
-                            <span className="author-name">{review.authorName || 'Anonymous Reviewer'}</span>
-                            <span className="package-name">{review.packageName}</span>
+                        {/* Review Author & Rating Bar */}
+                        <div className="review-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <div>
+                            <strong style={{ fontSize: '15px' }}>{review.authorName || 'Anonymous User'}</strong>
+                            <div style={{ fontSize: '13px', color: 'var(--gold)', marginTop: '2px' }}>
+                              <StarRating rating={review.starRating} /> ({review.starRating} / 5 stars)
+                            </div>
                           </div>
-                          <StarRating rating={review.starRating} />
+                          <span className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                            ID: {review.id}
+                          </span>
                         </div>
 
-                        <div className="review-text-box">
-                          "{review.reviewText || '(No text provided)'}"
+                        {/* Customer Review Text */}
+                        <div className="review-body" style={{ background: 'var(--bg-panel-2)', padding: '14px', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '16px', fontSize: '14px', lineHeight: '1.6' }}>
+                          "{review.reviewText}"
                         </div>
 
-                        <div className="draft-section">
-                          <label className="draft-label">AI Draft Reply (Editable)</label>
+                        {/* Editable AI Draft Reply Box */}
+                        <div className="form-group" style={{ marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                            <label style={{ fontSize: '12.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              AI Draft Reply (Editable)
+                            </label>
+                            <span className="mono" style={{ fontSize: '12px', color: isOverLimit ? 'var(--red)' : 'var(--text-muted)' }}>
+                              {charCount} / 350 max characters
+                            </span>
+                          </div>
                           <textarea
-                            className="draft-textarea"
+                            className="form-textarea"
                             value={currentText}
                             onChange={(e) => setEditedTexts({ ...editedTexts, [review.id]: e.target.value })}
                             disabled={isProcessing}
-                            placeholder="Type AI reply draft..."
+                            rows={3}
+                            style={{
+                              borderColor: isOverLimit ? 'var(--red)' : undefined,
+                            }}
                           />
-                          <div className={`char-counter ${isOverLimit ? 'over-limit' : ''}`}>
-                            {charCount} / 350 characters {isOverLimit && '(Exceeds 350 char limit!)'}
-                          </div>
                         </div>
 
-                        <div className="card-actions">
+                        {/* Action Buttons Toolbar */}
+                        <div className="review-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                           <button
                             className="btn btn-approve"
                             onClick={() => handleApprove(review.id)}
@@ -716,12 +710,12 @@ export default function App() {
             <h2 className="auth-card__title">
               {step === 1 && 'Get Started with ReviewForge'}
               {step === 2 && subStep === 'NOT_INVITED' && 'Account Not Found'}
-              {step === 2 && subStep === 'PROVISIONED' && 'Enter your password'}
+              {step === 2 && subStep === 'PROVISIONED' && (hasAuthAccount ? 'Welcome back! Enter your password' : 'Welcome! Set your password to get started')}
             </h2>
             <p className="auth-card__sub">
               {step === 1 && 'Enter your email address to continue'}
               {step === 2 && subStep === 'NOT_INVITED' && 'Invitation required for access'}
-              {step === 2 && subStep === 'PROVISIONED' && 'Enter your password to continue'}
+              {step === 2 && subStep === 'PROVISIONED' && (hasAuthAccount ? 'Enter your password to log in' : 'Create a password to set up your account')}
             </p>
           </div>
 
@@ -801,7 +795,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* Sub-Outcome B: Pre-Provisioned -> Single Password Input & Single "Continue" Button */}
+              {/* Sub-Outcome B: Pre-Provisioned -> Deterministic Password Flow Driven by hasAuthAccount */}
               {subStep === 'PROVISIONED' && (
                 <form onSubmit={handlePasswordSubmit} className="auth-form">
                   <div className="form-group">
@@ -820,7 +814,9 @@ export default function App() {
                   </div>
 
                   <button type="submit" className="btn-primary" disabled={submitting}>
-                    {submitting ? 'Processing...' : 'Continue'}
+                    {submitting
+                      ? (hasAuthAccount ? 'Logging in...' : 'Setting up account...')
+                      : (hasAuthAccount ? 'Log In' : 'Create Password')}
                   </button>
                 </form>
               )}

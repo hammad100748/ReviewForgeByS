@@ -684,9 +684,9 @@ router.get('/admin/customers', requireAdminBasicAuth, getActiveCustomersHandler)
 
 /**
  * GET /api/customers/by-email?email=x@example.com
- * Looks up a customer record by email in Firestore for access control.
+ * Looks up a customer record by email in Firestore for access control,
+ * and checks if a Firebase Auth account exists for this email.
  * Public endpoint used by customer-frontend before sign up / log in.
- * SECURITY: If not found, returns { success: true, exists: false } without leaking customer data.
  */
 router.get('/customers/by-email', async (req, res) => {
   const email = req.query.email;
@@ -699,7 +699,8 @@ router.get('/customers/by-email', async (req, res) => {
   }
 
   try {
-    const customer = await findCustomerByEmail(email.trim());
+    const trimmedEmail = email.trim().toLowerCase();
+    const customer = await findCustomerByEmail(trimmedEmail);
 
     if (!customer) {
       return res.status(200).json({
@@ -708,12 +709,21 @@ router.get('/customers/by-email', async (req, res) => {
       });
     }
 
+    let hasAuthAccount = false;
+    try {
+      await admin.auth().getUserByEmail(trimmedEmail);
+      hasAuthAccount = true;
+    } catch (authErr) {
+      hasAuthAccount = false;
+    }
+
     return res.status(200).json({
       success: true,
       exists: true,
       data: {
         onboardingStatus: customer.onboardingStatus || 'AWAITING_VERIFICATION',
         packageName: customer.packageName,
+        hasAuthAccount,
       },
     });
   } catch (error) {
