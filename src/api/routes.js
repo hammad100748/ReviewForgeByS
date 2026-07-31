@@ -16,6 +16,11 @@ const {
   getCustomer,
   updateOnboardingStatus,
 } = require('../models/customer');
+const {
+  getAppsByCustomer,
+  getAppById,
+  setAppAutoPostMode,
+} = require('../models/app');
 const { postApprovedReply } = require('../services/postReply');
 
 const router = express.Router();
@@ -291,7 +296,7 @@ router.get('/admin/analytics', requireAdminBasicAuth, async (req, res) => {
 });
 
 // ============================================================================
-// CUSTOMER PORTAL SCOPED REVIEWS, ME, & AUTO-POST ENDPOINTS
+// CUSTOMER PORTAL SCOPED APPS, REVIEWS, ME, & AUTO-POST ENDPOINTS
 // ============================================================================
 
 /**
@@ -333,8 +338,68 @@ router.get('/customer/me', verifyCustomerAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/customer/apps
+ * Protected endpoint returning all apps belonging to the logged-in customer.
+ * Powers the app-switcher dropdown on customer-frontend.
+ */
+router.get('/customer/apps', verifyCustomerAuth, async (req, res) => {
+  try {
+    const apps = await getAppsByCustomer(req.customer.id);
+    return res.status(200).json({
+      success: true,
+      data: apps,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: `Failed to fetch customer apps: ${error.message}`,
+    });
+  }
+});
+
+/**
+ * POST /api/customer/apps/:appId/autopost
+ * Protected endpoint for a logged-in customer to toggle autoPostEnabled for a specific app.
+ * Payload: { "enabled": true } or { "enabled": false }
+ */
+router.post('/customer/apps/:appId/autopost', verifyCustomerAuth, async (req, res) => {
+  const { appId } = req.params;
+  const { enabled } = req.body || {};
+
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({
+      success: false,
+      error: 'Field "enabled" must be a boolean (true or false).',
+    });
+  }
+
+  try {
+    const app = await getAppById(appId);
+    if (!app || app.customerId !== req.customer.id) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied: App does not belong to your account.',
+      });
+    }
+
+    await setAppAutoPostMode(appId, enabled);
+
+    return res.status(200).json({
+      success: true,
+      appId,
+      autoPostEnabled: enabled,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: `Failed to update app auto-post mode: ${error.message}`,
+    });
+  }
+});
+
+/**
  * POST /api/customer/autopost
- * Protected endpoint for a logged-in customer to toggle their autoPostEnabled setting.
+ * Protected legacy endpoint for a logged-in customer to toggle their customer autoPostEnabled setting.
  * Payload: { "enabled": true } or { "enabled": false }
  */
 router.post('/customer/autopost', verifyCustomerAuth, async (req, res) => {
@@ -349,6 +414,12 @@ router.post('/customer/autopost', verifyCustomerAuth, async (req, res) => {
 
   try {
     await setAutoPostMode(req.customer.id, enabled);
+
+    // Also update all apps belonging to this customer for backward compatibility
+    const apps = await getAppsByCustomer(req.customer.id);
+    for (const app of apps) {
+      await setAppAutoPostMode(app.id, enabled);
+    }
 
     return res.status(200).json({
       success: true,
@@ -398,7 +469,7 @@ router.post('/customer/autopost/bulk-post-pending', verifyCustomerAuth, async (r
 
 /**
  * POST /api/customer/verify-connection
- * Protected endpoint to test Google Play Console Developer API connection using stored credentials.
+ * Protected customer-level endpoint to test Google Play Console Developer API connection using stored credentials.
  * On success: updates onboardingStatus to "ACTIVE".
  */
 router.post('/customer/verify-connection', verifyCustomerAuth, async (req, res) => {
@@ -447,12 +518,32 @@ router.post('/customer/verify-connection', verifyCustomerAuth, async (req, res) 
 });
 
 /**
- * GET /api/customer/reviews/pending
- * Returns pending_approval reviews strictly scoped to the logged-in customer.
+ * GET /api/customer/reviews/pending?appId=xyz
+ * Returns pending_approval reviews strictly scoped to the logged-in customer and optional appId.
+ * If appId is provided: verifies ownership (must match customerId).
+ * If appId is omitted: defaults to customer's first app if available, for backward compatibility.
  */
 router.get('/customer/reviews/pending', verifyCustomerAuth, async (req, res) => {
   try {
-    const reviews = await getPendingReviewsByCustomer(req.customer.id);
+    let targetAppId = req.query.appId ? String(req.query.appId).trim() : null;
+
+    if (targetAppId) {
+      const app = await getAppById(targetAppId);
+      if (!app || app.customerId !== req.customer.id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied: App does not belong to your account.',
+        });
+      }
+    } else {
+      // Backward compatibility: If no appId passed, default to customer's first app if only one exists
+      const customerApps = await getAppsByCustomer(req.customer.id);
+      if (customerApps.length === 1) {
+        targetAppId = customerApps[0].id;
+      }
+    }
+
+    const reviews = await getPendingReviewsByCustomer(req.customer.id, targetAppId);
     return res.status(200).json({
       success: true,
       data: reviews,
@@ -466,13 +557,31 @@ router.get('/customer/reviews/pending', verifyCustomerAuth, async (req, res) => 
 });
 
 /**
- * GET /api/customer/reviews/history
- * Returns reviews with status 'posted' or 'rejected' strictly scoped to the logged-in customer.
+ * GET /api/customer/reviews/history?appId=xyz
+ * Returns reviews with status 'posted' or 'rejected' strictly scoped to the logged-in customer and optional appId.
  * Sorted newest first.
  */
 router.get('/customer/reviews/history', verifyCustomerAuth, async (req, res) => {
   try {
-    const history = await getCustomerReviewHistory(req.customer.id);
+    let targetAppId = req.query.appId ? String(req.query.appId).trim() : null;
+
+    if (targetAppId) {
+      const app = await getAppById(targetAppId);
+      if (!app || app.customerId !== req.customer.id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied: App does not belong to your account.',
+        });
+      }
+    } else {
+      // Backward compatibility: If no appId passed, default to customer's first app if only one exists
+      const customerApps = await getAppsByCustomer(req.customer.id);
+      if (customerApps.length === 1) {
+        targetAppId = customerApps[0].id;
+      }
+    }
+
+    const history = await getCustomerReviewHistory(req.customer.id, targetAppId);
     return res.status(200).json({
       success: true,
       data: history,

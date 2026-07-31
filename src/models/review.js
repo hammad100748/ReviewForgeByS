@@ -6,6 +6,7 @@ const REVIEWS_COLLECTION = 'reviews';
  * Saves a newly detected review and its generated draft reply to Firestore.
  * @param {Object} params
  * @param {string} params.customerId Firestore ID of customer
+ * @param {string} [params.appId] Firestore ID of app document
  * @param {string} params.packageName App Package Name
  * @param {string} params.reviewId Google Play Review ID
  * @param {string} params.authorName Reviewer author name
@@ -16,7 +17,7 @@ const REVIEWS_COLLECTION = 'reviews';
  * @param {string} [params.status='pending_approval'] Status of the review ('pending_approval' or 'posted')
  * @returns {Promise<Object>} Saved review document metadata
  */
-async function saveDraftReview({ customerId, packageName, reviewId, authorName, starRating, reviewText, draftReply, tag = 'other', status = 'pending_approval' }) {
+async function saveDraftReview({ customerId, appId, packageName, reviewId, authorName, starRating, reviewText, draftReply, tag = 'other', status = 'pending_approval' }) {
   if (!customerId || !packageName || !reviewId) {
     throw new Error('[REVIEW MODEL ERROR] Missing required fields (customerId, packageName, reviewId).');
   }
@@ -26,6 +27,7 @@ async function saveDraftReview({ customerId, packageName, reviewId, authorName, 
 
   const reviewData = {
     customerId,
+    ...(appId ? { appId } : {}),
     packageName,
     reviewId,
     authorName: authorName || 'Anonymous',
@@ -68,8 +70,8 @@ async function reviewExists(reviewId) {
 }
 
 /**
- * Retrieves all review documents with status 'pending_approval'.
- * @returns {Promise<Array<Object>>} List of pending review objects
+ * Retrieves all review documents with status "pending_approval" from Firestore.
+ * @returns {Promise<Array<Object>>} Array of pending review objects
  */
 async function getPendingReviews() {
   const snapshot = await db
@@ -78,13 +80,12 @@ async function getPendingReviews() {
     .get();
 
   const reviews = [];
-
   snapshot.forEach((doc) => {
     const data = doc.data();
     reviews.push({
       id: doc.id,
       ...data,
-      createdAt: data.createdAt ? data.createdAt.toDate() : null,
+      createdAtDate: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : null,
     });
   });
 
@@ -92,27 +93,34 @@ async function getPendingReviews() {
 }
 
 /**
- * Retrieves all review documents with status 'pending_approval' belonging to a specific customer.
+ * Retrieves review documents with status "pending_approval" strictly scoped to a specific customerId and optional appId.
  * @param {string} customerId Firestore Customer ID
- * @returns {Promise<Array<Object>>} List of pending review objects for the customer
+ * @param {string} [appId] Optional Firestore App Document ID
+ * @returns {Promise<Array<Object>>} Array of customer-scoped pending review objects
  */
-async function getPendingReviewsByCustomer(customerId) {
-  if (!customerId) return [];
+async function getPendingReviewsByCustomer(customerId, appId = null) {
+  if (!customerId) {
+    throw new Error('[REVIEW MODEL ERROR] customerId is required for getPendingReviewsByCustomer.');
+  }
 
-  const snapshot = await db
+  let query = db
     .collection(REVIEWS_COLLECTION)
     .where('customerId', '==', customerId)
-    .where('status', '==', 'pending_approval')
-    .get();
+    .where('status', '==', 'pending_approval');
+
+  if (appId) {
+    query = query.where('appId', '==', appId);
+  }
+
+  const snapshot = await query.get();
 
   const reviews = [];
-
   snapshot.forEach((doc) => {
     const data = doc.data();
     reviews.push({
       id: doc.id,
       ...data,
-      createdAt: data.createdAt ? data.createdAt.toDate() : null,
+      createdAtDate: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : null,
     });
   });
 
@@ -120,80 +128,75 @@ async function getPendingReviewsByCustomer(customerId) {
 }
 
 /**
- * Retrieves all review documents with status 'posted' or 'rejected' belonging to a specific customer.
- * Sorted newest first in memory.
+ * Retrieves review documents with status "posted" or "rejected" strictly scoped to a specific customerId and optional appId.
+ * Sorted newest first.
  * @param {string} customerId Firestore Customer ID
- * @returns {Promise<Array<Object>>} List of historical review objects for the customer
+ * @param {string} [appId] Optional Firestore App Document ID
+ * @returns {Promise<Array<Object>>} Array of customer-scoped historical review objects
  */
-async function getCustomerReviewHistory(customerId) {
-  if (!customerId) return [];
+async function getCustomerReviewHistory(customerId, appId = null) {
+  if (!customerId) {
+    throw new Error('[REVIEW MODEL ERROR] customerId is required for getCustomerReviewHistory.');
+  }
 
-  const snapshot = await db
+  let query = db
     .collection(REVIEWS_COLLECTION)
     .where('customerId', '==', customerId)
-    .where('status', 'in', ['posted', 'rejected'])
-    .get();
+    .where('status', 'in', ['posted', 'rejected']);
+
+  if (appId) {
+    query = query.where('appId', '==', appId);
+  }
+
+  const snapshot = await query.get();
 
   const reviews = [];
-
   snapshot.forEach((doc) => {
     const data = doc.data();
     reviews.push({
       id: doc.id,
       ...data,
-      createdAt: data.createdAt ? data.createdAt.toDate() : null,
-      postedAt: data.postedAt ? data.postedAt.toDate() : null,
-      updatedAt: data.updatedAt ? data.updatedAt.toDate() : null,
+      createdAtDate: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : null,
+      postedAtDate: data.postedAt ? (data.postedAt.toDate ? data.postedAt.toDate() : new Date(data.postedAt)) : null,
+      updatedAtDate: data.updatedAt ? (data.updatedAt.toDate ? data.updatedAt.toDate() : new Date(data.updatedAt)) : null,
     });
   });
 
-  // Sort newest first
+  // Sort newest first by postedAt / updatedAt / createdAt
   reviews.sort((a, b) => {
-    const getTime = (item) => {
-      const date = item.postedAt || item.updatedAt || item.createdAt;
-      return date ? new Date(date).getTime() : 0;
-    };
-    return getTime(b) - getTime(a);
+    const timeA = a.postedAtDate || a.updatedAtDate || a.createdAtDate || new Date(0);
+    const timeB = b.postedAtDate || b.updatedAtDate || b.createdAtDate || new Date(0);
+    return timeB.getTime() - timeA.getTime();
   });
 
   return reviews;
 }
 
 /**
- * Fetches a single review document from Firestore by its document ID.
- * @param {string} docId Firestore Document ID
+ * Retrieves a single review document by its Firestore document ID.
+ * @param {string} docId Firestore Review Document ID
  * @returns {Promise<Object|null>} Review document object or null if not found
  */
 async function getReviewById(docId) {
-  if (!docId) {
-    throw new Error('[REVIEW MODEL ERROR] docId is required.');
-  }
+  if (!docId) return null;
 
   const doc = await db.collection(REVIEWS_COLLECTION).doc(docId).get();
-
-  if (!doc.exists) {
-    return null;
-  }
-
-  const data = doc.data();
+  if (!doc.exists) return null;
 
   return {
     id: doc.id,
-    ...data,
-    createdAt: data.createdAt ? data.createdAt.toDate() : null,
-    postedAt: data.postedAt ? data.postedAt.toDate() : null,
-    updatedAt: data.updatedAt ? data.updatedAt.toDate() : null,
+    ...doc.data(),
   };
 }
 
 /**
- * Updates a review document's status field and optionally overwrites draftReply with finalReplyText.
+ * Updates status and optionally draftReply of a specific review document in Firestore.
  * @param {string} docId Firestore Document ID
- * @param {string} status New status string (e.g. 'posted', 'rejected', 'pending_approval')
- * @param {string} [finalReplyText] Optional final reply text if human edited it
- * @returns {Promise<Object>} Updated fields object
+ * @param {string} status New status string
+ * @param {string} [draftReply] Optional updated draft reply text
+ * @returns {Promise<Object>} Updated fields
  */
-async function updateReviewStatus(docId, status, finalReplyText) {
+async function updateReviewStatus(docId, status, draftReply) {
   if (!docId || !status) {
     throw new Error('[REVIEW MODEL ERROR] docId and status are required for updateReviewStatus.');
   }
@@ -203,8 +206,8 @@ async function updateReviewStatus(docId, status, finalReplyText) {
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
 
-  if (typeof finalReplyText === 'string') {
-    updateData.draftReply = finalReplyText;
+  if (typeof draftReply === 'string') {
+    updateData.draftReply = draftReply.trim();
   }
 
   if (status === 'posted') {

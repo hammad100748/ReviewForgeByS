@@ -76,6 +76,14 @@ export default function App() {
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
 
+  // Multi-App State
+  const [apps, setApps] = useState([]);
+  const [selectedAppId, setSelectedAppId] = useState('');
+  const [loadingApps, setLoadingApps] = useState(false);
+
+  // Derived Selected App
+  const selectedApp = apps.find(a => a.id === selectedAppId) || apps[0] || null;
+
   // Connection Verification State
   const [verifying, setVerifying] = useState(false);
   const [verifyingError, setVerifyingError] = useState('');
@@ -117,12 +125,43 @@ export default function App() {
         fetchCustomerProfile(user);
       } else {
         setCustomerProfile(null);
+        setApps([]);
+        setSelectedAppId('');
         setReviews([]);
         setHistoryReviews([]);
       }
     });
     return () => unsubscribe();
   }, []);
+
+  // Fetch Customer Apps List
+  const fetchCustomerApps = async (user = currentUser) => {
+    if (!user) return;
+    setLoadingApps(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`${API_BASE}/customer/apps`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setApps(json.data);
+        if (json.data.length > 0) {
+          setSelectedAppId(prev => {
+            const exists = json.data.some(a => a.id === prev);
+            return exists ? prev : json.data[0].id;
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Fetch customer apps error:', err);
+    } finally {
+      setLoadingApps(false);
+    }
+  };
 
   // Fetch Logged-In Customer Profile from Backend
   const fetchCustomerProfile = async (user) => {
@@ -140,8 +179,7 @@ export default function App() {
       if (json.success) {
         setCustomerProfile(json.data);
         if (json.data.onboardingStatus === 'ACTIVE') {
-          fetchCustomerReviews(user);
-          fetchCustomerHistory(user);
+          fetchCustomerApps(user);
         }
       } else {
         setProfileError(json.error || 'Failed to load customer profile.');
@@ -154,14 +192,15 @@ export default function App() {
     }
   };
 
-  // Fetch Customer-Scoped Pending Reviews
-  const fetchCustomerReviews = async (user = currentUser) => {
+  // Fetch Customer Reviews Scoped to selectedAppId
+  const fetchCustomerReviews = async (user = currentUser, appId = selectedAppId) => {
     if (!user) return;
     setLoadingReviews(true);
     setDashboardError('');
     try {
       const token = await user.getIdToken();
-      const res = await fetch(`${API_BASE}/customer/reviews/pending`, {
+      const queryParam = appId ? `?appId=${encodeURIComponent(appId)}` : '';
+      const res = await fetch(`${API_BASE}/customer/reviews/pending${queryParam}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -184,14 +223,15 @@ export default function App() {
     }
   };
 
-  // Fetch Customer-Scoped Review History (Posted & Rejected)
-  const fetchCustomerHistory = async (user = currentUser) => {
+  // Fetch Customer History Scoped to selectedAppId
+  const fetchCustomerHistory = async (user = currentUser, appId = selectedAppId) => {
     if (!user) return;
     setLoadingHistory(true);
     setDashboardError('');
     try {
       const token = await user.getIdToken();
-      const res = await fetch(`${API_BASE}/customer/reviews/history`, {
+      const queryParam = appId ? `?appId=${encodeURIComponent(appId)}` : '';
+      const res = await fetch(`${API_BASE}/customer/reviews/history${queryParam}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -209,6 +249,14 @@ export default function App() {
     }
   };
 
+  // Refetch reviews and history whenever selectedAppId changes
+  useEffect(() => {
+    if (currentUser && customerProfile?.onboardingStatus === 'ACTIVE' && selectedAppId) {
+      fetchCustomerReviews(currentUser, selectedAppId);
+      fetchCustomerHistory(currentUser, selectedAppId);
+    }
+  }, [selectedAppId]);
+
   // Customer Action: Undo Rejection
   const handleUndoReject = async (docId) => {
     if (!currentUser) return;
@@ -224,7 +272,7 @@ export default function App() {
       const json = await res.json();
       if (json.success) {
         setHistoryReviews(prev => prev.filter(r => r.id !== docId));
-        fetchCustomerReviews(currentUser);
+        fetchCustomerReviews(currentUser, selectedAppId);
         setDashboardSuccess('Moved back to pending — check your Pending queue');
       } else {
         setDashboardError(`Failed to undo rejection: ${json.error}`);
@@ -236,11 +284,11 @@ export default function App() {
     }
   };
 
-  // Customer Toggle Auto-Post Mode Handler
+  // Customer Toggle Auto-Post Mode Handler per Selected App
   const handleToggleAutoPost = async () => {
-    if (!currentUser || !customerProfile) return;
+    if (!currentUser || !selectedAppId) return;
 
-    const previousState = Boolean(customerProfile.autoPostEnabled);
+    const previousState = Boolean(selectedApp?.autoPostEnabled);
     const nextState = !previousState;
 
     setTogglingAutoPost(true);
@@ -249,7 +297,7 @@ export default function App() {
 
     try {
       const token = await currentUser.getIdToken();
-      const res = await fetch(`${API_BASE}/customer/autopost`, {
+      const res = await fetch(`${API_BASE}/customer/apps/${selectedAppId}/autopost`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -261,7 +309,7 @@ export default function App() {
       const json = await res.json();
 
       if (json.success) {
-        setCustomerProfile(prev => prev ? { ...prev, autoPostEnabled: nextState } : prev);
+        setApps(prev => prev.map(a => a.id === selectedAppId ? { ...a, autoPostEnabled: nextState } : a));
 
         if (nextState === true) {
           try {
@@ -271,21 +319,21 @@ export default function App() {
             });
             const bulkJson = await bulkRes.json();
             if (bulkJson.success) {
-              await fetchCustomerReviews(currentUser);
-              await fetchCustomerHistory(currentUser);
+              await fetchCustomerReviews(currentUser, selectedAppId);
+              await fetchCustomerHistory(currentUser, selectedAppId);
               if (bulkJson.postedCount > 0) {
-                setDashboardSuccess(`Auto-post enabled — ${bulkJson.postedCount} pending review(s) posted to Google Play.`);
+                setDashboardSuccess(`Auto-post enabled for ${selectedApp?.appName || 'app'} — ${bulkJson.postedCount} pending review(s) posted to Google Play.`);
               } else {
-                setDashboardSuccess('Auto-post mode ENABLED for your account.');
+                setDashboardSuccess(`Auto-post mode ENABLED for ${selectedApp?.appName || 'selected app'}.`);
               }
             } else {
-              setDashboardSuccess('Auto-post mode ENABLED for your account.');
+              setDashboardSuccess(`Auto-post mode ENABLED for ${selectedApp?.appName || 'selected app'}.`);
             }
           } catch (bulkErr) {
-            setDashboardSuccess('Auto-post mode ENABLED for your account.');
+            setDashboardSuccess(`Auto-post mode ENABLED for ${selectedApp?.appName || 'selected app'}.`);
           }
         } else {
-          setDashboardSuccess('Auto-post mode DISABLED for your account.');
+          setDashboardSuccess(`Auto-post mode DISABLED for ${selectedApp?.appName || 'selected app'}.`);
         }
       } else {
         setDashboardError(`Failed to update auto-post mode: ${json.error}`);
@@ -316,8 +364,7 @@ export default function App() {
 
       if (json.success) {
         setCustomerProfile(prev => prev ? { ...prev, onboardingStatus: 'ACTIVE' } : prev);
-        fetchCustomerReviews(currentUser);
-        fetchCustomerHistory(currentUser);
+        fetchCustomerApps(currentUser);
       } else {
         setVerifyingError(json.error || "Unable to verify Play Console permission. Please confirm the service account email has been added with 'Reply to reviews' permission.");
       }
@@ -371,7 +418,7 @@ export default function App() {
       if (json.success) {
         setReviews(prev => prev.filter(r => r.id !== docId));
         if (expandedDocId === docId) setExpandedDocId(null);
-        fetchCustomerHistory(currentUser);
+        fetchCustomerHistory(currentUser, selectedAppId);
         setDashboardSuccess('Reply posted to Google Play Store!');
       } else {
         setDashboardError(`Failed to post reply: ${json.error}`);
@@ -399,7 +446,7 @@ export default function App() {
       if (json.success) {
         setReviews(prev => prev.filter(r => r.id !== docId));
         if (expandedDocId === docId) setExpandedDocId(null);
-        fetchCustomerHistory(currentUser);
+        fetchCustomerHistory(currentUser, selectedAppId);
         setDashboardSuccess(`Review draft rejected and moved to Sent History.`);
       } else {
         setDashboardError(`Failed to reject review: ${json.error}`);
@@ -594,7 +641,7 @@ export default function App() {
     if (postedIds.length > 0) {
       setReviews(prev => prev.filter(r => !postedIds.includes(r.id)));
       if (postedIds.includes(expandedDocId)) setExpandedDocId(null);
-      fetchCustomerHistory(currentUser);
+      fetchCustomerHistory(currentUser, selectedAppId);
       setDashboardSuccess(`${successCount} replies posted successfully to Google Play Store!`);
     } else {
       setDashboardError(`Bulk approval process finished, but 0 replies were posted.`);
@@ -620,22 +667,47 @@ export default function App() {
   if (currentUser) {
     const isAwaiting = customerProfile?.onboardingStatus === 'AWAITING_VERIFICATION';
     const isActive = customerProfile?.onboardingStatus === 'ACTIVE';
-    const isAutoPost = Boolean(customerProfile?.autoPostEnabled);
+    const isAutoPost = Boolean(selectedApp?.autoPostEnabled);
 
     return (
       <div className="page-container">
         <header className="nav">
           <div className="nav__wrap">
-            <a href="#" className="nav__brand">
-              <span className="nav__brand-mark"></span> ReviewForge
-            </a>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <a href="#" className="nav__brand">
+                <span className="nav__brand-mark"></span> ReviewForge
+              </a>
+
+              {/* APP SWITCHER DROPDOWN (Top-Left next to logo) */}
+              {isActive && apps.length > 0 && (
+                <div className="app-switcher-box">
+                  <select
+                    className="app-switcher-select"
+                    value={selectedAppId || ''}
+                    onChange={(e) => setSelectedAppId(e.target.value)}
+                  >
+                    {apps.map((app) => (
+                      <option key={app.id} value={app.id}>
+                        📱 {app.appName}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedApp && (
+                    <span className="app-switcher-subtext">
+                      {selectedApp.packageName}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--text)' }}>
-                  {customerProfile?.appName || customerProfile?.name}
+                  {customerProfile?.name}
                 </div>
                 <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  {customerProfile?.packageName || customerProfile?.email}
+                  {customerProfile?.email}
                 </div>
               </div>
               <button className="btn-ghost" onClick={handleSignOut} style={{ padding: '8px 16px', fontSize: '13.5px' }}>
@@ -693,7 +765,7 @@ export default function App() {
                 <ol style={{ paddingLeft: '20px', fontSize: '14px', lineHeight: '1.7', color: 'var(--text-muted)' }}>
                   <li>Open <strong>Google Play Console</strong> and select <strong>Users and Permissions</strong></li>
                   <li>Click <strong>Invite new users</strong> and paste the email address above</li>
-                  <li>Under App Permissions, grant permission for <strong style={{ color: 'var(--text)' }}>{customerProfile?.appName || customerProfile?.packageName}</strong> <span style={{ color: 'var(--text-muted)' }}>({customerProfile?.packageName})</span></li>
+                  <li>Under App Permissions, grant permission for <strong style={{ color: 'var(--text)' }}>{customerProfile?.appName || customerProfile?.packageName}</strong></li>
                   <li>Enable the <strong style={{ color: 'var(--text)' }}>"Reply to reviews"</strong> permission and click Send Invite</li>
                   <li>Return here and click <strong>Verify Connection</strong> below</li>
                 </ol>
@@ -715,10 +787,10 @@ export default function App() {
               </button>
             </div>
           ) : isActive ? (
-            /* STATE B: ACTIVE (Scalable Reviews Dashboard with Sent/History Tab & Auto-Tagging) */
+            /* STATE B: ACTIVE (Scalable Reviews Dashboard with App Switcher) */
             <div style={{ width: '100%' }}>
 
-              {/* Self-Serve Auto-Post Toggle Control Box */}
+              {/* App-Specific Auto-Post Toggle Control Box */}
               <div className="dashboard-card" style={{ marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
                   <div>
@@ -730,8 +802,8 @@ export default function App() {
                     </div>
                     <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', margin: 0 }}>
                       {isAutoPost
-                        ? 'AI-generated replies are posted immediately to Google Play Store during review detection.'
-                        : 'Review drafts require your manual review and approval before being posted to Google Play.'}
+                        ? `AI-generated replies for ${selectedApp?.appName || 'this app'} are posted immediately to Google Play Store.`
+                        : `Review drafts for ${selectedApp?.appName || 'this app'} require your manual approval before being posted.`}
                     </p>
                   </div>
 
@@ -740,7 +812,7 @@ export default function App() {
                       type="checkbox"
                       checked={isAutoPost}
                       onChange={handleToggleAutoPost}
-                      disabled={togglingAutoPost}
+                      disabled={togglingAutoPost || !selectedAppId}
                       style={{ display: 'none' }}
                     />
                     <span
@@ -779,7 +851,7 @@ export default function App() {
                   className={`dashboard-tab-btn ${activeTab === 'PENDING' ? 'active' : ''}`}
                   onClick={() => {
                     setActiveTab('PENDING');
-                    fetchCustomerReviews(currentUser);
+                    fetchCustomerReviews(currentUser, selectedAppId);
                   }}
                 >
                   Pending Queue ({reviews.length})
@@ -788,7 +860,7 @@ export default function App() {
                   className={`dashboard-tab-btn ${activeTab === 'HISTORY' ? 'active' : ''}`}
                   onClick={() => {
                     setActiveTab('HISTORY');
-                    fetchCustomerHistory(currentUser);
+                    fetchCustomerHistory(currentUser, selectedAppId);
                   }}
                 >
                   Sent History ({historyReviews.length})
@@ -817,7 +889,7 @@ export default function App() {
                     <h3 style={{ fontSize: '18px' }}>
                       Pending Review Approvals ({reviews.length})
                     </h3>
-                    <button className="btn-ghost" onClick={() => fetchCustomerReviews(currentUser)} disabled={loadingReviews || bulkProcessing} style={{ padding: '6px 12px', fontSize: '13px' }}>
+                    <button className="btn-ghost" onClick={() => fetchCustomerReviews(currentUser, selectedAppId)} disabled={loadingReviews || bulkProcessing} style={{ padding: '6px 12px', fontSize: '13px' }}>
                       {loadingReviews ? 'Refreshing...' : '↻ Refresh Queue'}
                     </button>
                   </div>
@@ -904,7 +976,14 @@ export default function App() {
                       <div style={{ fontSize: '36px', marginBottom: '12px' }}>🎉</div>
                       <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>All caught up!</h3>
                       <p style={{ color: 'var(--text-muted)', fontSize: '14.5px' }}>
-                        No reviews are currently awaiting approval for <strong style={{ color: 'var(--text)' }}>{customerProfile?.appName || customerProfile?.packageName}</strong> <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>({customerProfile?.packageName})</span>.
+                        No reviews are currently awaiting approval for{' '}
+                        <strong style={{ color: 'var(--text)' }}>
+                          {selectedApp?.appName || selectedApp?.packageName || 'this app'}
+                        </strong>
+                        {selectedApp && selectedApp.appName !== selectedApp.packageName && (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}> ({selectedApp.packageName})</span>
+                        )}
+                        .
                       </p>
                     </div>
                   ) : sortedReviews.length === 0 ? (
@@ -1044,7 +1123,7 @@ export default function App() {
                     <h3 style={{ fontSize: '18px' }}>
                       Sent & Decision History ({historyReviews.length})
                     </h3>
-                    <button className="btn-ghost" onClick={() => fetchCustomerHistory(currentUser)} disabled={loadingHistory} style={{ padding: '6px 12px', fontSize: '13px' }}>
+                    <button className="btn-ghost" onClick={() => fetchCustomerHistory(currentUser, selectedAppId)} disabled={loadingHistory} style={{ padding: '6px 12px', fontSize: '13px' }}>
                       {loadingHistory ? 'Refreshing...' : '↻ Refresh History'}
                     </button>
                   </div>
@@ -1058,7 +1137,14 @@ export default function App() {
                       <div style={{ fontSize: '36px', marginBottom: '12px' }}>📜</div>
                       <h3 style={{ fontSize: '20px', marginBottom: '8px' }}>No review history yet</h3>
                       <p style={{ color: 'var(--text-muted)', fontSize: '14.5px' }}>
-                        Posted or rejected reviews for <strong style={{ color: 'var(--text)' }}>{customerProfile?.appName || customerProfile?.packageName}</strong> <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>({customerProfile?.packageName})</span> will appear here.
+                        Posted or rejected reviews for{' '}
+                        <strong style={{ color: 'var(--text)' }}>
+                          {selectedApp?.appName || selectedApp?.packageName || 'this app'}
+                        </strong>
+                        {selectedApp && selectedApp.appName !== selectedApp.packageName && (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}> ({selectedApp.packageName})</span>
+                        )}
+                        {' '}will appear here.
                       </p>
                     </div>
                   ) : (
@@ -1159,7 +1245,7 @@ export default function App() {
                 Bulk Approve Positive Reviews
               </h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '14.5px', lineHeight: '1.6', marginBottom: '24px' }}>
-                This will immediately post <strong>{qualifyingBulkReviews.length}</strong> review replies to Google Play Store using their AI-generated drafts as-is. Continue?
+                This will immediately post <strong>{qualifyingBulkReviews.length}</strong> review replies for <strong>{selectedApp?.appName || 'this app'}</strong> to Google Play Store using their AI-generated drafts as-is. Continue?
               </p>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                 <button

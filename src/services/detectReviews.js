@@ -1,40 +1,41 @@
 const { google } = require('googleapis');
-const { getAllActiveCustomers } = require('../models/customer');
+const { getAllActiveApps } = require('../models/app');
 const { reviewExists, saveDraftReview } = require('../models/review');
 const { generateReply } = require('../config/deepseek');
 
 /**
- * Runs the review detection, AI draft generation, and optional auto-post cycle across all active customers.
+ * Runs the review detection, AI draft generation, and optional auto-post cycle across all active apps.
  */
 async function runDetectionCycle() {
   console.log(`\n======================================================`);
   console.log(`     ReviewForge - Review Detection & AI Draft Cycle    `);
   console.log(`======================================================\n`);
 
-  let totalCustomersProcessed = 0;
+  let totalAppsProcessed = 0;
   let totalNewReviewsFound = 0;
   let totalSkippedAlreadyReplied = 0;
   let totalDraftsGenerated = 0;
   let totalAutoPosted = 0;
-  let totalCustomerErrors = 0;
+  let totalAppErrors = 0;
 
   try {
-    const customers = await getAllActiveCustomers();
-    console.log(`Found ${customers.length} active customer(s) to process.\n`);
+    const apps = await getAllActiveApps();
+    console.log(`Found ${apps.length} active app(s) to process.\n`);
 
-    for (const customer of customers) {
-      totalCustomersProcessed++;
-      const autoPostLabel = customer.autoPostEnabled ? '[Auto-Post: ENABLED]' : '[Auto-Post: DISABLED]';
-      console.log(`--- Processing Customer: ${customer.name} (${customer.packageName}) ${autoPostLabel} ---`);
+    for (const app of apps) {
+      totalAppsProcessed++;
+      const autoPostLabel = app.autoPostEnabled ? '[Auto-Post: ENABLED]' : '[Auto-Post: DISABLED]';
+      const ownerLabel = app.customerName || app.customerEmail || app.customerId;
+      console.log(`--- Processing App: ${app.appName} (${app.packageName}) ${autoPostLabel} [Customer: ${ownerLabel}] ---`);
 
       try {
-        if (!customer.serviceAccountJson) {
+        if (!app.serviceAccountJson) {
           throw new Error('No decrypted service account credentials available.');
         }
 
-        // Initialize GoogleAuth with decrypted inline credentials
+        // Initialize GoogleAuth with decrypted inline credentials from parent customer
         const auth = new google.auth.GoogleAuth({
-          credentials: customer.serviceAccountJson,
+          credentials: app.serviceAccountJson,
           scopes: ['https://www.googleapis.com/auth/androidpublisher'],
         });
 
@@ -46,16 +47,16 @@ async function runDetectionCycle() {
         console.log(`Fetching reviews from Google Play Developer API...`);
 
         const response = await androidpublisher.reviews.list({
-          packageName: customer.packageName,
+          packageName: app.packageName,
         });
 
         const reviews = response.data.reviews || [];
         console.log(`Fetched ${reviews.length} total review(s) from Google Play.`);
 
-        let customerNewReviews = 0;
-        let customerSkippedAlreadyReplied = 0;
-        let customerDraftsGenerated = 0;
-        let customerAutoPosted = 0;
+        let appNewReviews = 0;
+        let appSkippedAlreadyReplied = 0;
+        let appDraftsGenerated = 0;
+        let appAutoPosted = 0;
 
         for (const review of reviews) {
           const reviewId = review.reviewId;
@@ -66,7 +67,7 @@ async function runDetectionCycle() {
 
           if (hasDeveloperReply) {
             console.log(`Skipping review ${reviewId} — already has a developer reply on Google.`);
-            customerSkippedAlreadyReplied++;
+            appSkippedAlreadyReplied++;
             totalSkippedAlreadyReplied++;
             continue;
           }
@@ -77,7 +78,7 @@ async function runDetectionCycle() {
             continue;
           }
 
-          customerNewReviews++;
+          appNewReviews++;
           totalNewReviewsFound++;
 
           // Extract userComment from comments array
@@ -111,12 +112,12 @@ async function runDetectionCycle() {
 
           let isAutoPosted = false;
 
-          // 3. Handle Auto-Post Mode if enabled for this customer
-          if (customer.autoPostEnabled && draftReply && draftReply !== 'Could not generate AI draft reply.') {
-            console.log(`    [AUTO-POST] Mode is ENABLED. Attempting immediate post to Google Play...`);
+          // 3. Handle Auto-Post Mode if enabled for this app
+          if (app.autoPostEnabled && draftReply && draftReply !== 'Could not generate AI draft reply.') {
+            console.log(`    [AUTO-POST] App mode is ENABLED. Attempting immediate post to Google Play...`);
             try {
               const replyRes = await androidpublisher.reviews.reply({
-                packageName: customer.packageName,
+                packageName: app.packageName,
                 reviewId: reviewId,
                 requestBody: {
                   replyText: draftReply,
@@ -125,13 +126,14 @@ async function runDetectionCycle() {
 
               console.log(`    [AUTO-POST SUCCESS] Successfully posted reply to Google Play! (HTTP ${replyRes.status})`);
               isAutoPosted = true;
-              customerAutoPosted++;
+              appAutoPosted++;
               totalAutoPosted++;
 
-              // Save directly as posted
+              // Save directly as posted with customerId and appId
               await saveDraftReview({
-                customerId: customer.id,
-                packageName: customer.packageName,
+                customerId: app.customerId,
+                appId: app.id,
+                packageName: app.packageName,
                 reviewId,
                 authorName,
                 starRating,
@@ -141,7 +143,7 @@ async function runDetectionCycle() {
                 status: 'posted',
               });
 
-              console.log(`    Saved review to Firestore with status 'posted' and tag '${tag}'.\n`);
+              console.log(`    Saved review to Firestore with status 'posted', appId '${app.id}', and tag '${tag}'.\n`);
             } catch (postError) {
               console.error(`    [AUTO-POST FAILURE] Failed to post reply to Google Play: ${postError.message}`);
               console.error(`    Falling back to saving review as 'pending_approval'.\n`);
@@ -150,12 +152,13 @@ async function runDetectionCycle() {
 
           // 4. Fallback or Standard Manual Mode: Save as pending_approval
           if (!isAutoPosted) {
-            customerDraftsGenerated++;
+            appDraftsGenerated++;
             totalDraftsGenerated++;
 
             await saveDraftReview({
-              customerId: customer.id,
-              packageName: customer.packageName,
+              customerId: app.customerId,
+              appId: app.id,
+              packageName: app.packageName,
               reviewId,
               authorName,
               starRating,
@@ -165,15 +168,15 @@ async function runDetectionCycle() {
               status: 'pending_approval',
             });
 
-            console.log(`    Saved review draft to Firestore (status: pending_approval, tag: ${tag}).\n`);
+            console.log(`    Saved review draft to Firestore (status: pending_approval, appId: ${app.id}, tag: ${tag}).\n`);
           }
         }
 
-        console.log(`Customer Summary (${customer.name}): ${customerNewReviews} new review(s), ${customerSkippedAlreadyReplied} skipped (already replied), ${customerAutoPosted} auto-posted, ${customerDraftsGenerated} draft(s) pending approval.\n`);
+        console.log(`App Summary (${app.appName}): ${appNewReviews} new review(s), ${appSkippedAlreadyReplied} skipped (already replied), ${appAutoPosted} auto-posted, ${appDraftsGenerated} draft(s) pending approval.\n`);
 
-      } catch (customerError) {
-        totalCustomerErrors++;
-        console.error(`[CUSTOMER ERROR] Failed processing customer '${customer.name}' (${customer.id}): ${customerError.message}\n`);
+      } catch (appError) {
+        totalAppErrors++;
+        console.error(`[APP ERROR] Failed processing app '${app.appName}' (${app.id}): ${appError.message}\n`);
       }
     }
 
@@ -184,12 +187,12 @@ async function runDetectionCycle() {
   console.log(`======================================================`);
   console.log(`               Detection Cycle Complete               `);
   console.log(`======================================================`);
-  console.log(`Customers Processed: ${totalCustomersProcessed}`);
-  console.log(`New Reviews Found:   ${totalNewReviewsFound}`);
-  console.log(`Skipped (Replied):   ${totalSkippedAlreadyReplied}`);
-  console.log(`Auto-Posted:         ${totalAutoPosted}`);
-  console.log(`Pending Drafts:      ${totalDraftsGenerated}`);
-  console.log(`Customer Errors:     ${totalCustomerErrors}`);
+  console.log(`Apps Processed:   ${totalAppsProcessed}`);
+  console.log(`New Reviews Found: ${totalNewReviewsFound}`);
+  console.log(`Skipped (Replied): ${totalSkippedAlreadyReplied}`);
+  console.log(`Auto-Posted:       ${totalAutoPosted}`);
+  console.log(`Pending Drafts:    ${totalDraftsGenerated}`);
+  console.log(`App Errors:        ${totalAppErrors}`);
   console.log(`======================================================\n`);
 }
 
