@@ -17,6 +17,7 @@ const {
   updateOnboardingStatus,
 } = require('../models/customer');
 const {
+  addApp,
   getAppsByCustomer,
   getAppById,
   setAppAutoPostMode,
@@ -855,7 +856,7 @@ router.post('/reviews/:docId/reject', requireAdminBasicAuth, async (req, res) =>
 // ============================================================================
 
 /**
- * Shared Handler for fetching active customers.
+ * Shared Handler for fetching active customers along with their connected apps.
  * Protected by HTTP Basic Auth.
  * SECURITY: Decrypted service account JSON credentials are NEVER returned in this response.
  */
@@ -863,12 +864,31 @@ const getActiveCustomersHandler = async (req, res) => {
   try {
     const customers = await getAllActiveCustomers();
 
-    // Strip sensitive service account credentials before returning JSON
-    const safeCustomers = customers.map(({ serviceAccountJson, encryptedServiceAccount, ...safeCustomer }) => safeCustomer);
+    // Attach connected apps to each customer object
+    const safeCustomersWithApps = await Promise.all(
+      customers.map(async ({ serviceAccountJson, encryptedServiceAccount, ...safeCustomer }) => {
+        let apps = [];
+        try {
+          apps = await getAppsByCustomer(safeCustomer.id);
+        } catch (appErr) {
+          console.error(`[ADMIN CUSTOMERS API] Failed fetching apps for customer ${safeCustomer.id}: ${appErr.message}`);
+        }
+        return {
+          ...safeCustomer,
+          apps: apps.map(({ id, appName, packageName, autoPostEnabled, createdAt }) => ({
+            id,
+            appName,
+            packageName,
+            autoPostEnabled: Boolean(autoPostEnabled),
+            createdAt,
+          })),
+        };
+      })
+    );
 
     return res.status(200).json({
       success: true,
-      data: safeCustomers,
+      data: safeCustomersWithApps,
     });
   } catch (error) {
     return res.status(500).json({
@@ -881,11 +901,53 @@ const getActiveCustomersHandler = async (req, res) => {
 /**
  * GET /api/customers
  * GET /api/admin/customers
- * Returns all active customers.
+ * Returns all active customers with their nested connected apps.
  * Protected by HTTP Basic Auth.
  */
 router.get('/customers', requireAdminBasicAuth, getActiveCustomersHandler);
 router.get('/admin/customers', requireAdminBasicAuth, getActiveCustomersHandler);
+
+/**
+ * POST /api/admin/customers/:customerId/apps
+ * Adds an additional app to an already-existing, already-verified customer.
+ * Protected by HTTP Basic Auth.
+ * Payload: { "appName": "...", "packageName": "..." }
+ */
+router.post('/admin/customers/:customerId/apps', requireAdminBasicAuth, async (req, res) => {
+  const { customerId } = req.params;
+  const { appName, packageName } = req.body || {};
+
+  if (!appName || typeof appName !== 'string' || !appName.trim()) {
+    return res.status(400).json({ success: false, error: 'App Name is required.' });
+  }
+
+  if (!packageName || typeof packageName !== 'string' || !packageName.trim()) {
+    return res.status(400).json({ success: false, error: 'Package Name is required.' });
+  }
+
+  try {
+    const customer = await getCustomer(customerId);
+    if (!customer) {
+      return res.status(404).json({ success: false, error: 'Customer not found.' });
+    }
+
+    const newApp = await addApp({
+      customerId,
+      appName: appName.trim(),
+      packageName: packageName.trim(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: newApp,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: `Failed to add app to customer: ${error.message}`,
+    });
+  }
+});
 
 /**
  * GET /api/customers/by-email?email=x@example.com
@@ -950,7 +1012,8 @@ router.get('/customers/by-email', async (req, res) => {
 
 /**
  * POST /api/customers/create
- * Creates a new customer record with encrypted service account credentials and AWAITING_VERIFICATION status.
+ * Creates a new customer record with encrypted service account credentials and AWAITING_VERIFICATION status,
+ * AND automatically creates their first app document in the "apps" collection.
  * Protected by HTTP Basic Auth.
  * Payload: { "name": "...", "email": "...", "appName": "...", "packageName": "...", "serviceAccountJson": { ... } }
  */
@@ -1019,14 +1082,22 @@ router.post('/customers/create', requireAdminBasicAuth, async (req, res) => {
       onboardingStatus: 'AWAITING_VERIFICATION',
     });
 
+    // 5. Automatically create the first app document in "apps" collection
+    const newApp = await addApp({
+      customerId: newCustomer.id,
+      appName: appName.trim(),
+      packageName: packageName.trim(),
+    });
+
     return res.status(200).json({
       success: true,
       data: {
         id: newCustomer.id,
         name: newCustomer.name,
         email: newCustomer.email,
-        appName: newCustomer.appName,
-        packageName: newCustomer.packageName,
+        appId: newApp.id,
+        appName: newApp.appName,
+        packageName: newApp.packageName,
         onboardingStatus: newCustomer.onboardingStatus,
       },
     });

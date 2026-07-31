@@ -25,7 +25,7 @@ export default function App() {
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
 
-  // Add Customer Modal State
+  // Add Customer Modal State (Brand-New Customer + First App)
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustEmail, setNewCustEmail] = useState('');
@@ -34,6 +34,15 @@ export default function App() {
   const [selectedJsonFile, setSelectedJsonFile] = useState(null);
   const [submittingCustomer, setSubmittingCustomer] = useState(false);
   const [modalError, setModalError] = useState('');
+
+  // Add Additional App Modal State (Existing Customer + New App)
+  const [showAddAppModal, setShowAddAppModal] = useState(false);
+  const [selectedCustomerIdForApp, setSelectedCustomerIdForApp] = useState(null);
+  const [selectedCustomerNameForApp, setSelectedCustomerNameForApp] = useState('');
+  const [addAppName, setAddAppName] = useState('');
+  const [addPackageName, setAddPackageName] = useState('');
+  const [submittingApp, setSubmittingApp] = useState(false);
+  const [addAppModalError, setAddAppModalError] = useState('');
 
   // Notification Banners
   const [errorBanner, setErrorBanner] = useState('');
@@ -111,7 +120,7 @@ export default function App() {
     setLoginPassword('');
   };
 
-  // Fetch Customers List
+  // Fetch Customers List with Nested Apps
   const fetchCustomers = async () => {
     if (!isAuthenticated) return;
     setLoadingCustomers(true);
@@ -158,7 +167,7 @@ export default function App() {
     }
   }, [isAuthenticated, activeTab]);
 
-  // Handle Add Customer Submission
+  // Handle Add Customer Submission (Brand-New Customer + First App)
   const handleCreateCustomer = async (e) => {
     e.preventDefault();
     setModalError('');
@@ -230,7 +239,7 @@ export default function App() {
         setNewAppName('');
         setNewCustPackage('');
         setSelectedJsonFile(null);
-        setSuccessBanner(`Customer '${json.data.name}' created successfully (Status: Awaiting Verification).`);
+        setSuccessBanner(`Customer '${json.data.name}' created with app '${json.data.appName}' (Status: Awaiting Verification).`);
         fetchCustomers();
       } else {
         setModalError(json.error || 'Failed to create customer.');
@@ -239,6 +248,59 @@ export default function App() {
       setModalError(err.message);
     } finally {
       setSubmittingCustomer(false);
+    }
+  };
+
+  // Open "Add App" Modal for an Existing Customer
+  const handleOpenAddAppModal = (customer) => {
+    setSelectedCustomerIdForApp(customer.id);
+    setSelectedCustomerNameForApp(customer.name);
+    setAddAppName('');
+    setAddPackageName('');
+    setAddAppModalError('');
+    setShowAddAppModal(true);
+  };
+
+  // Handle "Add App" Form Submission
+  const handleCreateAppForCustomer = async (e) => {
+    e.preventDefault();
+    setAddAppModalError('');
+
+    if (!addAppName.trim()) {
+      setAddAppModalError('App Name is required.');
+      return;
+    }
+
+    if (!addPackageName.trim()) {
+      setAddAppModalError('Package Name is required.');
+      return;
+    }
+
+    setSubmittingApp(true);
+
+    try {
+      const res = await apiFetch(`/admin/customers/${selectedCustomerIdForApp}/apps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appName: addAppName.trim(),
+          packageName: addPackageName.trim(),
+        }),
+      });
+
+      const json = await res.json();
+
+      if (json.success) {
+        setShowAddAppModal(false);
+        setSuccessBanner(`App '${json.data.appName}' added successfully to '${selectedCustomerNameForApp}'.`);
+        fetchCustomers();
+      } else {
+        setAddAppModalError(json.error || 'Failed to add app.');
+      }
+    } catch (err) {
+      setAddAppModalError(err.message);
+    } finally {
+      setSubmittingApp(false);
     }
   };
 
@@ -521,36 +583,75 @@ export default function App() {
               <p>Click "Add New Customer" above to configure your first Google Play app.</p>
             </div>
           ) : (
-            <div className="customers-list">
+            <div className="customers-list" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               {customers.map((customer) => {
-                const isEnabled = customer.autoPostEnabled;
                 const isAwaiting = customer.onboardingStatus === 'AWAITING_VERIFICATION';
 
                 return (
-                  <div key={customer.id} className="customer-row">
-                    <div className="customer-info-group">
-                      <div className="customer-meta">
-                        <h3>
-                          {customer.name}
-                          <span className={`badge-status ${isAwaiting ? 'awaiting' : 'active'}`}>
-                            {isAwaiting ? 'Awaiting Verification' : 'Active'}
-                          </span>
-                        </h3>
-                        {customer.appName && (
-                          <div style={{ fontWeight: 600, fontSize: '14.5px', color: 'var(--text)', marginTop: '2px' }}>
-                            {customer.appName}
-                          </div>
-                        )}
-                        <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                          {customer.packageName} • {customer.email}
-                        </p>
+                  <div key={customer.id} className="customer-row" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem' }}>
+                    {/* Customer Main Row */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div className="customer-info-group">
+                        <div className="customer-meta">
+                          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            {customer.name}
+                            <span className={`badge-status ${isAwaiting ? 'awaiting' : 'active'}`}>
+                              {isAwaiting ? 'Awaiting Verification' : 'Active'}
+                            </span>
+                          </h3>
+                          <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            {customer.email}
+                          </p>
+                        </div>
                       </div>
+
+                      {/* "+ Add App" Button for Active Customers */}
+                      {!isAwaiting && (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleOpenAddAppModal(customer)}
+                          style={{ padding: '6px 14px', fontSize: '13px' }}
+                        >
+                          + Add App
+                        </button>
+                      )}
                     </div>
 
-                    {/* Read-Only Auto-Post Status Badge */}
-                    <span className={`badge-autopost ${isEnabled ? 'enabled' : 'disabled'}`}>
-                      Auto-Post: {isEnabled ? 'ON' : 'OFF'}
-                    </span>
+                    {/* Connected Apps List (Nested & Indented) */}
+                    <div className="nested-apps-container" style={{ marginTop: '0.25rem', paddingLeft: '1rem', borderLeft: '2px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div style={{ fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 600 }}>
+                        Connected Apps ({customer.apps?.length || 0})
+                      </div>
+                      {customer.apps && customer.apps.length > 0 ? (
+                        customer.apps.map((app) => (
+                          <div key={app.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-dark)', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                            <div>
+                              <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>📱 {app.appName}</strong>
+                              <div style={{ fontFamily: 'monospace', fontSize: '11.5px', color: 'var(--text-muted)' }}>{app.packageName}</div>
+                            </div>
+                            <span className={`badge-autopost ${app.autoPostEnabled ? 'enabled' : 'disabled'}`}>
+                              Auto-Post: {app.autoPostEnabled ? 'ON' : 'OFF'}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          {customer.packageName ? (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-dark)', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                              <div>
+                                <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>📱 {customer.appName || customer.packageName}</strong>
+                                <div style={{ fontFamily: 'monospace', fontSize: '11.5px', color: 'var(--text-muted)' }}>{customer.packageName}</div>
+                              </div>
+                              <span className={`badge-autopost ${customer.autoPostEnabled ? 'enabled' : 'disabled'}`}>
+                                Auto-Post: {customer.autoPostEnabled ? 'ON' : 'OFF'}
+                              </span>
+                            </div>
+                          ) : (
+                            'No connected apps.'
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -559,7 +660,7 @@ export default function App() {
         </main>
       )}
 
-      {/* Add Customer Modal */}
+      {/* Add New Customer Modal (Brand-New Customer + First App) */}
       {showAddModal && (
         <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
@@ -601,7 +702,7 @@ export default function App() {
               </div>
 
               <div className="form-group">
-                <label>App Name</label>
+                <label>First App Name</label>
                 <input
                   type="text"
                   className="form-input"
@@ -650,6 +751,68 @@ export default function App() {
                   disabled={submittingCustomer}
                 >
                   {submittingCustomer ? 'Creating Customer...' : 'Create Customer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Additional App Modal (Existing Customer + New App) */}
+      {showAddAppModal && (
+        <div className="modal-overlay" onClick={() => setShowAddAppModal(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Add Additional App to {selectedCustomerNameForApp}</h2>
+              <button className="modal-close-btn" onClick={() => setShowAddAppModal(false)}>✕</button>
+            </div>
+
+            {addAppModalError && (
+              <div className="banner banner-error" style={{ marginBottom: '1rem' }}>
+                <span>⚠️ {addAppModalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateAppForCustomer} className="modal-body">
+              <div className="form-group">
+                <label>App Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. AI Coding Assistant"
+                  value={addAppName}
+                  onChange={(e) => setAddAppName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Android Package Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. com.example.myapp"
+                  value={addPackageName}
+                  onChange={(e) => setAddPackageName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowAddAppModal(false)}
+                  disabled={submittingApp}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={submittingApp}
+                >
+                  {submittingApp ? 'Adding App...' : 'Add App'}
                 </button>
               </div>
             </form>
