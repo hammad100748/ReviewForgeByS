@@ -35,9 +35,9 @@ function TagBadge({ tag }) {
 }
 
 function formatRelativeTime(dateInput) {
-  if (!dateInput) return '';
+  if (!dateInput) return 'Never';
   const date = new Date(dateInput);
-  if (isNaN(date.getTime())) return '';
+  if (isNaN(date.getTime())) return 'Never';
 
   const now = new Date();
   const diffSeconds = Math.floor((now - date) / 1000);
@@ -80,6 +80,10 @@ export default function App() {
   const [apps, setApps] = useState([]);
   const [selectedAppId, setSelectedAppId] = useState('');
   const [loadingApps, setLoadingApps] = useState(false);
+
+  // Manual Sync & Cooldown State
+  const [syncingApp, setSyncingApp] = useState(false);
+  const [syncCooldownSeconds, setSyncCooldownSeconds] = useState(0);
 
   // Derived Selected App
   const selectedApp = apps.find(a => a.id === selectedAppId) || apps[0] || null;
@@ -133,6 +137,36 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Cooldown Countdown Timer Effect
+  useEffect(() => {
+    if (syncCooldownSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setSyncCooldownSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [syncCooldownSeconds]);
+
+  // Sync Cooldown Checker on App Selection
+  useEffect(() => {
+    if (selectedApp?.lastManualSyncAt) {
+      const lastMs = new Date(selectedApp.lastManualSyncAt).getTime();
+      const elapsed = Date.now() - lastMs;
+      if (elapsed < 90000) {
+        setSyncCooldownSeconds(Math.ceil((90000 - elapsed) / 1000));
+      } else {
+        setSyncCooldownSeconds(0);
+      }
+    } else {
+      setSyncCooldownSeconds(0);
+    }
+  }, [selectedAppId, apps]);
 
   // Fetch Customer Apps List
   const fetchCustomerApps = async (user = currentUser) => {
@@ -256,6 +290,48 @@ export default function App() {
       fetchCustomerHistory(currentUser, selectedAppId);
     }
   }, [selectedAppId]);
+
+  // On-Demand Google Play Sync Trigger Handler
+  const handleManualSync = async () => {
+    if (!currentUser || !selectedAppId || syncingApp || syncCooldownSeconds > 0) return;
+
+    setSyncingApp(true);
+    setDashboardError('');
+    setDashboardSuccess('');
+
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch(`${API_BASE}/customer/apps/${selectedAppId}/sync`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const json = await res.json();
+
+      if (res.status === 429) {
+        const remaining = json.remainingSeconds || 90;
+        setSyncCooldownSeconds(remaining);
+        setDashboardError(json.error || `Please wait ${remaining} more seconds before syncing again.`);
+      } else if (json.success) {
+        setDashboardSuccess(json.message || 'Sync complete.');
+        // Set cooldown timer on client side
+        setSyncCooldownSeconds(90);
+        // Refresh apps list to update lastSyncedAt in state
+        fetchCustomerApps(currentUser);
+        // Refetch pending reviews & history
+        fetchCustomerReviews(currentUser, selectedAppId);
+        fetchCustomerHistory(currentUser, selectedAppId);
+      } else {
+        setDashboardError(json.error || 'Failed to sync with Google Play.');
+      }
+    } catch (err) {
+      setDashboardError(`Sync error: ${err.message}`);
+    } finally {
+      setSyncingApp(false);
+    }
+  };
 
   // Customer Action: Undo Rejection
   const handleUndoReject = async (docId) => {
@@ -884,13 +960,28 @@ export default function App() {
               {/* ============================================================ */}
               {activeTab === 'PENDING' && (
                 <div>
-                  {/* Pending Reviews Section Header */}
+                  {/* Pending Reviews Section Header & Sync Now Action */}
                   <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <h3 style={{ fontSize: '18px' }}>
-                      Pending Review Approvals ({reviews.length})
-                    </h3>
-                    <button className="btn-ghost" onClick={() => fetchCustomerReviews(currentUser, selectedAppId)} disabled={loadingReviews || bulkProcessing} style={{ padding: '6px 12px', fontSize: '13px' }}>
-                      {loadingReviews ? 'Refreshing...' : '↻ Refresh Queue'}
+                    <div>
+                      <h3 style={{ fontSize: '18px', margin: 0 }}>
+                        Pending Review Approvals ({reviews.length})
+                      </h3>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        Last synced: {selectedApp?.lastSyncedAt ? formatRelativeTime(selectedApp.lastSyncedAt) : 'Never'}
+                      </div>
+                    </div>
+
+                    <button
+                      className="btn-ghost"
+                      onClick={handleManualSync}
+                      disabled={loadingReviews || syncingApp || syncCooldownSeconds > 0 || bulkProcessing}
+                      style={{ padding: '8px 16px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      {syncingApp
+                        ? '🔄 Syncing Google Play...'
+                        : syncCooldownSeconds > 0
+                        ? `⏳ Sync again in ${syncCooldownSeconds}s`
+                        : '↻ Sync Now'}
                     </button>
                   </div>
 

@@ -60,6 +60,8 @@ async function getAppsByCustomer(customerId) {
       packageName: data.packageName,
       autoPostEnabled: Boolean(data.autoPostEnabled),
       createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : null,
+      lastSyncedAt: data.lastSyncedAt ? (data.lastSyncedAt.toDate ? data.lastSyncedAt.toDate() : new Date(data.lastSyncedAt)) : null,
+      lastManualSyncAt: data.lastManualSyncAt ? (data.lastManualSyncAt.toDate ? data.lastManualSyncAt.toDate() : new Date(data.lastManualSyncAt)) : null,
     });
   });
 
@@ -96,6 +98,8 @@ async function getAppById(appId) {
     packageName: data.packageName,
     autoPostEnabled: Boolean(data.autoPostEnabled),
     createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : null,
+    lastSyncedAt: data.lastSyncedAt ? (data.lastSyncedAt.toDate ? data.lastSyncedAt.toDate() : new Date(data.lastSyncedAt)) : null,
+    lastManualSyncAt: data.lastManualSyncAt ? (data.lastManualSyncAt.toDate ? data.lastManualSyncAt.toDate() : new Date(data.lastManualSyncAt)) : null,
   };
 }
 
@@ -115,6 +119,32 @@ async function setAppAutoPostMode(appId, enabled) {
     autoPostEnabled: isEnabled,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
+
+  await db.collection(APPS_COLLECTION).doc(appId).update(updateData);
+
+  return updateData;
+}
+
+/**
+ * Updates the sync timestamps for a specific app document in Firestore.
+ * @param {string} appId Firestore App Document ID
+ * @param {Object} options
+ * @param {boolean} [options.isManual=false] If true, also updates lastManualSyncAt
+ * @returns {Promise<Object>} Updated timestamp fields
+ */
+async function updateAppSyncTimestamps(appId, { isManual = false } = {}) {
+  if (!appId) {
+    throw new Error('[APP MODEL ERROR] appId is required for updateAppSyncTimestamps.');
+  }
+
+  const nowTimestamp = admin.firestore.FieldValue.serverTimestamp();
+  const updateData = {
+    lastSyncedAt: nowTimestamp,
+  };
+
+  if (isManual) {
+    updateData.lastManualSyncAt = nowTimestamp;
+  }
 
   await db.collection(APPS_COLLECTION).doc(appId).update(updateData);
 
@@ -158,6 +188,8 @@ async function getAllActiveApps() {
         packageName: data.packageName,
         autoPostEnabled: Boolean(data.autoPostEnabled),
         createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : null,
+        lastSyncedAt: data.lastSyncedAt ? (data.lastSyncedAt.toDate ? data.lastSyncedAt.toDate() : new Date(data.lastSyncedAt)) : null,
+        lastManualSyncAt: data.lastManualSyncAt ? (data.lastManualSyncAt.toDate ? data.lastManualSyncAt.toDate() : new Date(data.lastManualSyncAt)) : null,
         onboardingStatus: customer.onboardingStatus,
         serviceAccountJson: customer.serviceAccountJson,
         customerName: customer.name,
@@ -174,5 +206,6 @@ module.exports = {
   getAppsByCustomer,
   getAppById,
   setAppAutoPostMode,
+  updateAppSyncTimestamps,
   getAllActiveApps,
 };

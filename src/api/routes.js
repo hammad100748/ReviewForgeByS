@@ -23,6 +23,7 @@ const {
   setAppAutoPostMode,
 } = require('../models/app');
 const { postApprovedReply } = require('../services/postReply');
+const { processSingleApp } = require('../services/detectReviews');
 
 const router = express.Router();
 
@@ -354,6 +355,74 @@ router.get('/customer/apps', verifyCustomerAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       error: `Failed to fetch customer apps: ${error.message}`,
+    });
+  }
+});
+
+/**
+ * POST /api/customer/apps/:appId/sync
+ * Protected endpoint for an on-demand review detection trigger for a specific app.
+ * Enforces a 90-second manual sync cooldown rate limit per app.
+ */
+router.post('/customer/apps/:appId/sync', verifyCustomerAuth, async (req, res) => {
+  const { appId } = req.params;
+
+  try {
+    const app = await getAppById(appId);
+    if (!app || app.customerId !== req.customer.id) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied: App does not belong to your account.',
+      });
+    }
+
+    // 90-Second Cooldown Rate Limiting
+    const nowMs = Date.now();
+    if (app.lastManualSyncAt) {
+      const lastSyncMs = app.lastManualSyncAt.getTime ? app.lastManualSyncAt.getTime() : new Date(app.lastManualSyncAt).getTime();
+      const elapsedMs = nowMs - lastSyncMs;
+      if (elapsedMs < 90000) {
+        const remainingSeconds = Math.ceil((90000 - elapsedMs) / 1000);
+        return res.status(429).json({
+          success: false,
+          error: `Please wait ${remainingSeconds} more second(s) before syncing again.`,
+          remainingSeconds,
+        });
+      }
+    }
+
+    // Fetch parent customer credentials
+    const fullCustomer = await getCustomer(req.customer.id);
+    if (!fullCustomer || !fullCustomer.serviceAccountJson) {
+      return res.status(400).json({
+        success: false,
+        error: 'Customer service account credentials incomplete.',
+      });
+    }
+
+    const fullAppObj = {
+      ...app,
+      serviceAccountJson: fullCustomer.serviceAccountJson,
+      customerName: fullCustomer.name,
+      customerEmail: fullCustomer.email,
+    };
+
+    // Run single-app detection cycle
+    const stats = await processSingleApp(fullAppObj, { isManual: true });
+    const newCount = stats.appNewReviews || 0;
+    const message = newCount > 0 ? `Found ${newCount} new review(s)` : 'No new reviews found';
+
+    return res.status(200).json({
+      success: true,
+      newReviewsFound: newCount,
+      message,
+      lastSyncedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`[MANUAL SYNC ERROR] Sync failed for app ${appId}: ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      error: `Sync failed: ${error.message}`,
     });
   }
 });
@@ -875,12 +944,14 @@ const getActiveCustomersHandler = async (req, res) => {
         }
         return {
           ...safeCustomer,
-          apps: apps.map(({ id, appName, packageName, autoPostEnabled, createdAt }) => ({
+          apps: apps.map(({ id, appName, packageName, autoPostEnabled, createdAt, lastSyncedAt, lastManualSyncAt }) => ({
             id,
             appName,
             packageName,
             autoPostEnabled: Boolean(autoPostEnabled),
             createdAt,
+            lastSyncedAt,
+            lastManualSyncAt,
           })),
         };
       })
