@@ -316,7 +316,7 @@ export default function App() {
           </div>
 
           {loginError && (
-            <div className="banner banner-error" style={{ marginBottom: '1.25rem' }}>
+            <div className="banner banner-error">
               <span>⚠️ {loginError}</span>
             </div>
           )}
@@ -374,7 +374,7 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <button className="btn btn-secondary" onClick={() => setShowAddModal(true)}>
+          <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
             + Add New Customer
           </button>
           <button className="btn btn-logout" onClick={handleAdminLogout}>
@@ -384,7 +384,7 @@ export default function App() {
       </header>
 
       {/* Main Tab Navigation */}
-      <div className="tab-navigation" style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', borderBottom: '1px solid var(--border)' }}>
+      <div className="tab-navigation" style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', borderBottom: '1px solid var(--border-color)' }}>
         <button
           className={`tab-btn ${activeTab === 'CUSTOMERS' ? 'active' : ''}`}
           onClick={() => setActiveTab('CUSTOMERS')}
@@ -422,14 +422,14 @@ export default function App() {
 
       {/* Banners */}
       {successBanner && (
-        <div className="banner banner-success" style={{ marginBottom: '1.5rem' }}>
+        <div className="banner banner-success">
           <span>✓ {successBanner}</span>
           <button className="banner-close" onClick={() => setSuccessBanner('')}>✕</button>
         </div>
       )}
 
       {errorBanner && (
-        <div className="banner banner-error" style={{ marginBottom: '1.5rem' }}>
+        <div className="banner banner-error">
           <span>⚠️ {errorBanner}</span>
           <button className="banner-close" onClick={() => setErrorBanner('')}>✕</button>
         </div>
@@ -488,7 +488,7 @@ export default function App() {
               {((analytics.staleOnboarding && analytics.staleOnboarding.length > 0) ||
                 (analytics.inactiveCustomers && analytics.inactiveCustomers.length > 0)) && (
                 <div className="followup-section" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <h3 style={{ fontSize: '1.1rem', color: 'var(--text)' }}>Founder Action Items</h3>
+                  <h3 style={{ fontSize: '1.1rem', color: 'var(--text-main)' }}>Founder Action Items</h3>
 
                   {analytics.staleOnboarding && analytics.staleOnboarding.length > 0 && (
                     <div className="banner banner-error" style={{ display: 'block' }}>
@@ -504,7 +504,7 @@ export default function App() {
                   )}
 
                   {analytics.inactiveCustomers && analytics.inactiveCustomers.length > 0 && (
-                    <div className="banner banner-error" style={{ display: 'block', backgroundColor: 'rgba(232, 169, 59, 0.15)', borderColor: 'rgba(232, 169, 59, 0.4)', color: 'var(--gold)' }}>
+                    <div className="banner banner-error" style={{ display: 'block', backgroundColor: 'rgba(245, 197, 24, 0.15)', borderColor: 'rgba(245, 197, 24, 0.4)', color: 'var(--gold)' }}>
                       <strong style={{ display: 'block', marginBottom: '0.25rem' }}>⚠️ Inactive Customers (0 Replies Posted in Last 7 Days):</strong>
                       <ul style={{ margin: '0.25rem 0 0 1.25rem', padding: 0 }}>
                         {analytics.inactiveCustomers.map((item) => (
@@ -520,36 +520,36 @@ export default function App() {
 
               {/* Per-Customer Activity Breakdown Table */}
               <div>
-                <h3 style={{ fontSize: '1.1rem', color: 'var(--text)', marginBottom: '0.75rem' }}>Customer Review Activity Breakdown</h3>
+                <h3 style={{ fontSize: '1.1rem', color: 'var(--text-main)', marginBottom: '0.75rem' }}>Customer Review Activity Breakdown</h3>
                 {!analytics.reviewsPerCustomer || analytics.reviewsPerCustomer.length === 0 ? (
                   <div className="empty-state">
                     <p>No customer review metrics available.</p>
                   </div>
                 ) : (
                   <div className="table-container">
-                    <table className="analytics-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                    <table className="analytics-table">
                       <thead>
-                        <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                          <th style={{ padding: '0.75rem' }}>Customer Name</th>
-                          <th style={{ padding: '0.75rem' }}>App / Package Name</th>
-                          <th style={{ padding: '0.75rem' }}>Total Reviews</th>
-                          <th style={{ padding: '0.75rem' }}>Posted</th>
-                          <th style={{ padding: '0.75rem' }}>Pending</th>
-                          <th style={{ padding: '0.75rem' }}>Rejected</th>
+                        <tr>
+                          <th>Customer Name</th>
+                          <th>App / Package Name</th>
+                          <th>Total Reviews</th>
+                          <th>Posted</th>
+                          <th>Pending</th>
+                          <th>Rejected</th>
                         </tr>
                       </thead>
                       <tbody>
                         {analytics.reviewsPerCustomer.map((cust) => (
-                          <tr key={cust.customerId} style={{ borderBottom: '1px solid var(--border)' }}>
-                            <td style={{ padding: '0.75rem', fontWeight: 600 }}>{cust.customerName}</td>
-                            <td style={{ padding: '0.75rem' }}>
-                              <div style={{ fontWeight: 600, color: 'var(--text)' }}>{cust.appName || cust.packageName}</div>
-                              <div style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-muted)' }}>{cust.packageName}</div>
+                          <tr key={cust.customerId}>
+                            <td style={{ fontWeight: 600 }}>{cust.customerName}</td>
+                            <td>
+                              <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{cust.appName || cust.packageName}</div>
+                              <div style={{ fontFamily: 'monospace', fontSize: '11.5px', color: 'var(--text-muted)' }}>{cust.packageName}</div>
                             </td>
-                            <td style={{ padding: '0.75rem', fontWeight: 600 }}>{cust.totalReviews}</td>
-                            <td style={{ padding: '0.75rem', color: 'var(--mint)' }}>{cust.posted}</td>
-                            <td style={{ padding: '0.75rem', color: 'var(--gold)' }}>{cust.pending}</td>
-                            <td style={{ padding: '0.75rem', color: 'var(--text-muted)' }}>{cust.rejected}</td>
+                            <td style={{ fontWeight: 600 }}>{cust.totalReviews}</td>
+                            <td style={{ color: 'var(--mint)', fontWeight: 600 }}>{cust.posted}</td>
+                            <td style={{ color: 'var(--gold)', fontWeight: 600 }}>{cust.pending}</td>
+                            <td style={{ color: 'var(--text-muted)' }}>{cust.rejected}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -583,74 +583,65 @@ export default function App() {
               <p>Click "Add New Customer" above to configure your first Google Play app.</p>
             </div>
           ) : (
-            <div className="customers-list" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div className="customers-list">
               {customers.map((customer) => {
                 const isAwaiting = customer.onboardingStatus === 'AWAITING_VERIFICATION';
 
                 return (
-                  <div key={customer.id} className="customer-row" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem' }}>
-                    {/* Customer Main Row */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div className="customer-info-group">
-                        <div className="customer-meta">
-                          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            {customer.name}
-                            <span className={`badge-status ${isAwaiting ? 'awaiting' : 'active'}`}>
-                              {isAwaiting ? 'Awaiting Verification' : 'Active'}
-                            </span>
-                          </h3>
-                          <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                            {customer.email}
-                          </p>
+                  <div key={customer.id} className="customer-card">
+                    {/* Customer Header Row */}
+                    <div className="customer-card__header">
+                      <div className="customer-card__identity">
+                        <div className="customer-card__title-row">
+                          <h3 className="customer-card__name">{customer.name}</h3>
+                          <span className={`badge-status ${isAwaiting ? 'awaiting' : 'active'}`}>
+                            {isAwaiting ? 'Awaiting Verification' : 'Active'}
+                          </span>
                         </div>
+                        <p className="customer-card__email">{customer.email}</p>
                       </div>
 
-                      {/* "+ Add App" Button for Active Customers */}
                       {!isAwaiting && (
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => handleOpenAddAppModal(customer)}
-                          style={{ padding: '6px 14px', fontSize: '13px' }}
-                        >
-                          + Add App
-                        </button>
+                        <div className="customer-card__actions">
+                          <button
+                            className="btn-add-app"
+                            onClick={() => handleOpenAddAppModal(customer)}
+                          >
+                            + Add App
+                          </button>
+                        </div>
                       )}
                     </div>
 
-                    {/* Connected Apps List (Nested & Indented) */}
-                    <div className="nested-apps-container" style={{ marginTop: '0.25rem', paddingLeft: '1rem', borderLeft: '2px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <div style={{ fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    {/* Connected Apps List */}
+                    <div className="nested-apps">
+                      <div className="nested-apps__header">
                         Connected Apps ({customer.apps?.length || 0})
                       </div>
-                      {customer.apps && customer.apps.length > 0 ? (
-                        customer.apps.map((app) => (
-                          <div key={app.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-dark)', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                            <div>
-                              <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>📱 {app.appName}</strong>
-                              <div style={{ fontFamily: 'monospace', fontSize: '11.5px', color: 'var(--text-muted)' }}>{app.packageName}</div>
-                            </div>
-                            <span className={`badge-autopost ${app.autoPostEnabled ? 'enabled' : 'disabled'}`}>
-                              Auto-Post: {app.autoPostEnabled ? 'ON' : 'OFF'}
-                            </span>
-                          </div>
-                        ))
-                      ) : (
-                        <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                          {customer.packageName ? (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-dark)', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                              <div>
-                                <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>📱 {customer.appName || customer.packageName}</strong>
-                                <div style={{ fontFamily: 'monospace', fontSize: '11.5px', color: 'var(--text-muted)' }}>{customer.packageName}</div>
+                      <div className="nested-apps__list">
+                        {customer.apps && customer.apps.length > 0 ? (
+                          customer.apps.map((app) => (
+                            <div key={app.id} className="app-item">
+                              <div className="app-item__info">
+                                <span className="app-item__icon">📱</span>
+                                <div className="app-item__details">
+                                  <span className="app-item__name">{app.appName}</span>
+                                  <span className="app-item__package">{app.packageName}</span>
+                                </div>
                               </div>
-                              <span className={`badge-autopost ${customer.autoPostEnabled ? 'enabled' : 'disabled'}`}>
-                                Auto-Post: {customer.autoPostEnabled ? 'ON' : 'OFF'}
-                              </span>
+                              <div className="app-item__badge">
+                                <span className={`badge-autopost ${app.autoPostEnabled ? 'enabled' : 'disabled'}`}>
+                                  Auto-Post: {app.autoPostEnabled ? 'ON' : 'OFF'}
+                                </span>
+                              </div>
                             </div>
-                          ) : (
-                            'No connected apps.'
-                          )}
-                        </div>
-                      )}
+                          ))
+                        ) : (
+                          <div className="app-item" style={{ fontStyle: 'italic', color: 'var(--text-muted)' }}>
+                            No connected apps.
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -670,7 +661,7 @@ export default function App() {
             </div>
 
             {modalError && (
-              <div className="banner banner-error" style={{ marginBottom: '1rem' }}>
+              <div className="banner banner-error">
                 <span>⚠️ {modalError}</span>
               </div>
             )}
@@ -768,7 +759,7 @@ export default function App() {
             </div>
 
             {addAppModalError && (
-              <div className="banner banner-error" style={{ marginBottom: '1rem' }}>
+              <div className="banner banner-error">
                 <span>⚠️ {addAppModalError}</span>
               </div>
             )}
