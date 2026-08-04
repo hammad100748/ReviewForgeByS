@@ -36,6 +36,35 @@ async function addApp({ customerId, appName, packageName }) {
 }
 
 /**
+ * Looks up an app document across ALL customers by its exact packageName.
+ * Used to enforce global uniqueness of package names across accounts.
+ * @param {string} packageName
+ * @returns {Promise<Object|null>} App object or null if not found
+ */
+async function findAppByPackageName(packageName) {
+  if (!packageName || typeof packageName !== 'string' || !packageName.trim()) {
+    return null;
+  }
+
+  const snapshot = await db
+    .collection(APPS_COLLECTION)
+    .where('packageName', '==', packageName.trim())
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) {
+    return null;
+  }
+
+  const doc = snapshot.docs[0];
+  const data = doc.data();
+  return {
+    id: doc.id,
+    ...data,
+  };
+}
+
+/**
  * Retrieves all app documents belonging to a specific customer, sorted by createdAt.
  * @param {string} customerId
  * @returns {Promise<Array<Object>>} Array of app objects
@@ -153,8 +182,8 @@ async function updateAppSyncTimestamps(appId, { isManual = false } = {}) {
 
 /**
  * Retrieves all app documents joined with their parent customer's onboardingStatus and decrypted serviceAccountJson.
- * Only includes apps whose parent customer has onboardingStatus === "ACTIVE".
- * Used by the detection cycle going forward instead of getAllActiveCustomers().
+ * Only includes apps whose parent customer has onboardingStatus === "ACTIVE" AND active !== false.
+ * Used by the detection cycle.
  * @returns {Promise<Array<Object>>} Array of active app objects with parent customer data
  */
 async function getAllActiveApps() {
@@ -179,7 +208,7 @@ async function getAllActiveApps() {
 
     const customer = customerCache[customerId];
 
-    if (customer && customer.onboardingStatus === 'ACTIVE' && customer.serviceAccountJson) {
+    if (customer && customer.onboardingStatus === 'ACTIVE' && customer.active !== false && customer.serviceAccountJson) {
       activeApps.push({
         id: doc.id,
         appId: doc.id,
@@ -203,6 +232,7 @@ async function getAllActiveApps() {
 
 module.exports = {
   addApp,
+  findAppByPackageName,
   getAppsByCustomer,
   getAppById,
   setAppAutoPostMode,

@@ -44,6 +44,16 @@ export default function App() {
   const [submittingApp, setSubmittingApp] = useState(false);
   const [addAppModalError, setAddAppModalError] = useState('');
 
+  // Suspend / Reactivate Action Loading State
+  const [suspendingCustomerId, setSuspendingCustomerId] = useState(null);
+
+  // Delete Customer Confirmation Modal State
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [targetDeleteCustomer, setTargetDeleteCustomer] = useState(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [deletingCustomer, setDeletingCustomer] = useState(false);
+  const [deleteModalError, setDeleteModalError] = useState('');
+
   // Notification Banners
   const [errorBanner, setErrorBanner] = useState('');
   const [successBanner, setSuccessBanner] = useState('');
@@ -301,6 +311,80 @@ export default function App() {
       setAddAppModalError(err.message);
     } finally {
       setSubmittingApp(false);
+    }
+  };
+
+  // Handle Suspend / Reactivate Customer Toggle
+  const handleToggleSuspendCustomer = async (customer) => {
+    const isSuspended = customer.active === false;
+    const actionPath = isSuspended ? 'reactivate' : 'suspend';
+    const actionLabel = isSuspended ? 'reactivate' : 'suspend';
+
+    setSuspendingCustomerId(customer.id);
+    setErrorBanner('');
+    setSuccessBanner('');
+
+    try {
+      const res = await apiFetch(`/admin/customers/${customer.id}/${actionPath}`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSuccessBanner(json.message || `Customer '${customer.name}' ${actionLabel}d.`);
+        fetchCustomers();
+      } else {
+        setErrorBanner(json.error || `Failed to ${actionLabel} customer.`);
+      }
+    } catch (err) {
+      setErrorBanner(`API error: ${err.message}`);
+    } finally {
+      setSuspendingCustomerId(null);
+    }
+  };
+
+  // Open Irreversible Delete Customer Modal
+  const handleOpenDeleteModal = (customer) => {
+    setTargetDeleteCustomer(customer);
+    setDeleteConfirmInput('');
+    setDeleteModalError('');
+    setShowDeleteModal(true);
+  };
+
+  // Handle Execute Customer Deletion
+  const handleExecuteDeleteCustomer = async (e) => {
+    e.preventDefault();
+    if (!targetDeleteCustomer) return;
+
+    const trimmedInput = deleteConfirmInput.trim().toLowerCase();
+    const expectedName = targetDeleteCustomer.name.trim().toLowerCase();
+    const expectedEmail = targetDeleteCustomer.email.trim().toLowerCase();
+
+    if (trimmedInput !== expectedName && trimmedInput !== expectedEmail) {
+      setDeleteModalError(`Confirmation text must match customer name ("${targetDeleteCustomer.name}") or email ("${targetDeleteCustomer.email}").`);
+      return;
+    }
+
+    setDeletingCustomer(true);
+    setDeleteModalError('');
+    setErrorBanner('');
+    setSuccessBanner('');
+
+    try {
+      const res = await apiFetch(`/admin/customers/${targetDeleteCustomer.id}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (json.success) {
+        setShowDeleteModal(false);
+        setSuccessBanner(json.message || `Customer '${targetDeleteCustomer.name}' deleted.`);
+        fetchCustomers();
+      } else {
+        setDeleteModalError(json.error || 'Failed to delete customer.');
+      }
+    } catch (err) {
+      setDeleteModalError(`Delete error: ${err.message}`);
+    } finally {
+      setDeletingCustomer(false);
     }
   };
 
@@ -586,31 +670,56 @@ export default function App() {
             <div className="customers-list">
               {customers.map((customer) => {
                 const isAwaiting = customer.onboardingStatus === 'AWAITING_VERIFICATION';
+                const isSuspended = customer.active === false;
 
                 return (
-                  <div key={customer.id} className="customer-card">
+                  <div key={customer.id} className={`customer-card ${isSuspended ? 'is-suspended' : ''}`}>
                     {/* Customer Header Row */}
                     <div className="customer-card__header">
                       <div className="customer-card__identity">
                         <div className="customer-card__title-row">
                           <h3 className="customer-card__name">{customer.name}</h3>
-                          <span className={`badge-status ${isAwaiting ? 'awaiting' : 'active'}`}>
-                            {isAwaiting ? 'Awaiting Verification' : 'Active'}
-                          </span>
+                          {isSuspended ? (
+                            <span className="badge-status suspended">SUSPENDED</span>
+                          ) : isAwaiting ? (
+                            <span className="badge-status awaiting">Awaiting Verification</span>
+                          ) : (
+                            <span className="badge-status active">Active</span>
+                          )}
                         </div>
                         <p className="customer-card__email">{customer.email}</p>
                       </div>
 
-                      {!isAwaiting && (
-                        <div className="customer-card__actions">
+                      {/* Customer Actions Toolbar */}
+                      <div className="customer-card__actions">
+                        {!isAwaiting && !isSuspended && (
                           <button
                             className="btn-add-app"
                             onClick={() => handleOpenAddAppModal(customer)}
                           >
                             + Add App
                           </button>
-                        </div>
-                      )}
+                        )}
+
+                        <button
+                          className="btn-suspend"
+                          onClick={() => handleToggleSuspendCustomer(customer)}
+                          disabled={suspendingCustomerId === customer.id}
+                        >
+                          {suspendingCustomerId === customer.id
+                            ? 'Updating...'
+                            : isSuspended
+                            ? 'Reactivate'
+                            : 'Suspend'}
+                        </button>
+
+                        <button
+                          className="btn-danger"
+                          onClick={() => handleOpenDeleteModal(customer)}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
 
                     {/* Connected Apps List */}
@@ -804,6 +913,76 @@ export default function App() {
                   disabled={submittingApp}
                 >
                   {submittingApp ? 'Adding App...' : 'Add App'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Customer Confirmation Modal */}
+      {showDeleteModal && targetDeleteCustomer && (
+        <div className="modal-overlay" onClick={() => setShowDeleteModal(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 style={{ color: 'var(--red)' }}>⚠️ Delete Customer</h2>
+              <button className="modal-close-btn" onClick={() => setShowDeleteModal(false)}>✕</button>
+            </div>
+
+            {deleteModalError && (
+              <div className="banner banner-error">
+                <span>⚠️ {deleteModalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleExecuteDeleteCustomer} className="modal-body">
+              <div className="alert banner-error" style={{ display: 'block', fontSize: '0.875rem', lineHeight: '1.5' }}>
+                <strong style={{ display: 'block', marginBottom: '0.4rem' }}>
+                  This action is permanent and cannot be undone!
+                </strong>
+                Deleting <strong>{targetDeleteCustomer.name}</strong> will permanently remove:
+                <ul style={{ margin: '0.4rem 0 0 1.25rem' }}>
+                  <li>All review records and draft history</li>
+                  <li>All {targetDeleteCustomer.apps?.length || 0} connected app configuration(s)</li>
+                  <li>Their login account and authentication credentials</li>
+                </ul>
+              </div>
+
+              <div className="form-group">
+                <label>
+                  Type <strong>{targetDeleteCustomer.email}</strong> or <strong>{targetDeleteCustomer.name}</strong> to confirm:
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder={`Type "${targetDeleteCustomer.email}"`}
+                  value={deleteConfirmInput}
+                  onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                  disabled={deletingCustomer}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowDeleteModal(false)}
+                  disabled={deletingCustomer}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-danger-fill"
+                  disabled={
+                    deletingCustomer ||
+                    (deleteConfirmInput.trim().toLowerCase() !== targetDeleteCustomer.name.trim().toLowerCase() &&
+                      deleteConfirmInput.trim().toLowerCase() !== targetDeleteCustomer.email.trim().toLowerCase())
+                  }
+                >
+                  {deletingCustomer ? 'Deleting Everything...' : 'Permanently Delete Customer'}
                 </button>
               </div>
             </form>

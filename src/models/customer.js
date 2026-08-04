@@ -20,9 +20,11 @@ async function findCustomerByEmail(email) {
   if (snapshot.empty) return null;
 
   const doc = snapshot.docs[0];
+  const data = doc.data();
   return {
     id: doc.id,
-    ...doc.data(),
+    ...data,
+    active: data.active !== false,
   };
 }
 
@@ -121,6 +123,28 @@ async function updateOnboardingStatus(customerId, status) {
 }
 
 /**
+ * Updates the active status (suspend / reactivate) for a customer document in Firestore.
+ * @param {string} customerId Firestore Customer ID
+ * @param {boolean} active True for active, false for suspended
+ * @returns {Promise<Object>} Updated fields
+ */
+async function setCustomerActiveStatus(customerId, active) {
+  if (!customerId) {
+    throw new Error('[CUSTOMER MODEL ERROR] customerId is required for setCustomerActiveStatus.');
+  }
+
+  const isActive = Boolean(active);
+  const updateData = {
+    active: isActive,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  await db.collection(CUSTOMERS_COLLECTION).doc(customerId).update(updateData);
+
+  return updateData;
+}
+
+/**
  * Retrieves and decrypts a customer document by Firestore ID.
  * @param {string} customerId
  * @returns {Promise<Object|null>} Customer object with decrypted serviceAccountJson and autoPostEnabled
@@ -148,22 +172,18 @@ async function getCustomer(customerId) {
     packageName: data.packageName,
     autoPostEnabled: Boolean(data.autoPostEnabled),
     onboardingStatus: data.onboardingStatus || 'AWAITING_VERIFICATION',
-    active: data.active,
+    active: data.active !== false,
     createdAt: data.createdAt ? data.createdAt.toDate() : null,
     serviceAccountJson,
   };
 }
 
 /**
- * Retrieves all active customers (where active == true) and decrypts their service account JSON credentials.
- * @returns {Promise<Array<Object>>} Array of active customer objects
+ * Retrieves ALL customers regardless of active status (for Admin View).
+ * @returns {Promise<Array<Object>>} Array of customer objects
  */
-async function getAllActiveCustomers() {
-  const snapshot = await db
-    .collection(CUSTOMERS_COLLECTION)
-    .where('active', '==', true)
-    .get();
-
+async function getAllCustomers() {
+  const snapshot = await db.collection(CUSTOMERS_COLLECTION).get();
   const customers = [];
 
   for (const doc of snapshot.docs) {
@@ -187,8 +207,8 @@ async function getAllActiveCustomers() {
       packageName: data.packageName,
       autoPostEnabled: Boolean(data.autoPostEnabled),
       onboardingStatus: data.onboardingStatus || 'AWAITING_VERIFICATION',
-      active: data.active,
-      createdAt: data.createdAt ? data.createdAt.toDate() : null,
+      active: data.active !== false,
+      createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : null,
       serviceAccountJson,
     });
   }
@@ -196,11 +216,22 @@ async function getAllActiveCustomers() {
   return customers;
 }
 
+/**
+ * Retrieves all active customers (where active != false).
+ * @returns {Promise<Array<Object>>} Array of active customer objects
+ */
+async function getAllActiveCustomers() {
+  const all = await getAllCustomers();
+  return all.filter(c => c.active !== false);
+}
+
 module.exports = {
   addCustomer,
   findCustomerByEmail,
   setAutoPostMode,
   updateOnboardingStatus,
+  setCustomerActiveStatus,
   getCustomer,
+  getAllCustomers,
   getAllActiveCustomers,
 };

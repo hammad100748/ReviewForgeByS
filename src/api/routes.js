@@ -10,7 +10,9 @@ const {
 } = require('../models/review');
 const {
   getAllActiveCustomers,
+  getAllCustomers,
   setAutoPostMode,
+  setCustomerActiveStatus,
   addCustomer,
   findCustomerByEmail,
   getCustomer,
@@ -18,6 +20,7 @@ const {
 } = require('../models/customer');
 const {
   addApp,
+  findAppByPackageName,
   getAppsByCustomer,
   getAppById,
   setAppAutoPostMode,
@@ -88,7 +91,7 @@ function requireAdminBasicAuth(req, res, next) {
 
 /**
  * Middleware to verify Firebase ID Token and enforce email pre-provisioning in Firestore.
- * Rejects with HTTP 403 if the authenticated email is not found in Firestore.
+ * Rejects suspended customers with HTTP 403.
  */
 async function verifyCustomerAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -119,6 +122,14 @@ async function verifyCustomerAuth(req, res, next) {
       return res.status(403).json({
         success: false,
         error: 'No account found for this email. Please contact support.',
+      });
+    }
+
+    // Check account suspension status
+    if (customer.active === false) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account has been suspended. Please contact support.',
       });
     }
 
@@ -181,7 +192,7 @@ router.get('/admin/analytics', requireAdminBasicAuth, async (req, res) => {
       customersByStatus[status] = (customersByStatus[status] || 0) + 1;
     });
 
-    const activeCustomers = customers.filter((c) => c.onboardingStatus === 'ACTIVE');
+    const activeCustomers = customers.filter((c) => c.onboardingStatus === 'ACTIVE' && c.active !== false);
     const autoPostEnabledCount = activeCustomers.filter((c) => c.autoPostEnabled === true).length;
     const autoPostDisabledCount = activeCustomers.length - autoPostEnabledCount;
     const autoPostAdoption = {
@@ -328,6 +339,7 @@ router.get('/customer/me', verifyCustomerAuth, async (req, res) => {
         packageName: fullCustomer.packageName,
         autoPostEnabled: Boolean(fullCustomer.autoPostEnabled),
         onboardingStatus: fullCustomer.onboardingStatus || 'AWAITING_VERIFICATION',
+        active: fullCustomer.active !== false,
         serviceAccountEmail,
       },
     });
@@ -925,13 +937,13 @@ router.post('/reviews/:docId/reject', requireAdminBasicAuth, async (req, res) =>
 // ============================================================================
 
 /**
- * Shared Handler for fetching active customers along with their connected apps.
+ * Shared Handler for fetching all customers along with their connected apps.
  * Protected by HTTP Basic Auth.
  * SECURITY: Decrypted service account JSON credentials are NEVER returned in this response.
  */
 const getActiveCustomersHandler = async (req, res) => {
   try {
-    const customers = await getAllActiveCustomers();
+    const customers = await getAllCustomers();
 
     // Attach connected apps to each customer object
     const safeCustomersWithApps = await Promise.all(
@@ -972,7 +984,7 @@ const getActiveCustomersHandler = async (req, res) => {
 /**
  * GET /api/customers
  * GET /api/admin/customers
- * Returns all active customers with their nested connected apps.
+ * Returns all active and suspended customers with their nested connected apps.
  * Protected by HTTP Basic Auth.
  */
 router.get('/customers', requireAdminBasicAuth, getActiveCustomersHandler);
@@ -981,6 +993,7 @@ router.get('/admin/customers', requireAdminBasicAuth, getActiveCustomersHandler)
 /**
  * POST /api/admin/customers/:customerId/apps
  * Adds an additional app to an already-existing, already-verified customer.
+ * Enforces global package name uniqueness.
  * Protected by HTTP Basic Auth.
  * Payload: { "appName": "...", "packageName": "..." }
  */
@@ -996,16 +1009,27 @@ router.post('/admin/customers/:customerId/apps', requireAdminBasicAuth, async (r
     return res.status(400).json({ success: false, error: 'Package Name is required.' });
   }
 
+  const trimmedPackage = packageName.trim();
+
   try {
     const customer = await getCustomer(customerId);
     if (!customer) {
       return res.status(404).json({ success: false, error: 'Customer not found.' });
     }
 
+    // Check for duplicate package name across ALL accounts
+    const existingApp = await findAppByPackageName(trimmedPackage);
+    if (existingApp) {
+      return res.status(400).json({
+        success: false,
+        error: 'This package name is already connected to another account.',
+      });
+    }
+
     const newApp = await addApp({
       customerId,
       appName: appName.trim(),
-      packageName: packageName.trim(),
+      packageName: trimmedPackage,
     });
 
     return res.status(200).json({
@@ -1016,6 +1040,152 @@ router.post('/admin/customers/:customerId/apps', requireAdminBasicAuth, async (r
     return res.status(500).json({
       success: false,
       error: `Failed to add app to customer: ${error.message}`,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/customers/:customerId/suspend
+ * Sets active: false on a customer document, pausing cron processing and blocking customer login.
+ * Protected by HTTP Basic Auth.
+ */
+router.post('/admin/customers/:customerId/suspend', requireAdminBasicAuth, async (req, res) => {
+  const { customerId } = req.params;
+
+  try {
+    const customer = await getCustomer(customerId);
+    if (!customer) {
+      return res.status(404).json({ success: false, error: 'Customer not found.' });
+    }
+
+    await setCustomerActiveStatus(customerId, false);
+
+    return res.status(200).json({
+      success: true,
+      active: false,
+      message: `Customer '${customer.name}' has been suspended.`,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: `Failed to suspend customer: ${error.message}`,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/customers/:customerId/reactivate
+ * Sets active: true on a customer document, restoring cron processing and customer login.
+ * Protected by HTTP Basic Auth.
+ */
+router.post('/admin/customers/:customerId/reactivate', requireAdminBasicAuth, async (req, res) => {
+  const { customerId } = req.params;
+
+  try {
+    const customer = await getCustomer(customerId);
+    if (!customer) {
+      return res.status(404).json({ success: false, error: 'Customer not found.' });
+    }
+
+    await setCustomerActiveStatus(customerId, true);
+
+    return res.status(200).json({
+      success: true,
+      active: true,
+      message: `Customer '${customer.name}' has been reactivated.`,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: `Failed to reactivate customer: ${error.message}`,
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/customers/:customerId
+ * Irreversibly deletes a customer and all associated reviews, apps, and Firebase Auth account.
+ * Protected by HTTP Basic Auth.
+ */
+router.delete('/admin/customers/:customerId', requireAdminBasicAuth, async (req, res) => {
+  const { customerId } = req.params;
+
+  try {
+    const customer = await getCustomer(customerId);
+    if (!customer) {
+      return res.status(404).json({ success: false, error: 'Customer not found.' });
+    }
+
+    let deletedReviews = 0;
+    let deletedApps = 0;
+    let authAccountDeleted = false;
+    let customerDeleted = false;
+
+    // Step 1: Delete all review documents for this customer
+    try {
+      const revSnap = await db.collection('reviews').where('customerId', '==', customerId).get();
+      for (const doc of revSnap.docs) {
+        await doc.ref.delete();
+        deletedReviews++;
+      }
+      console.log(`[DELETE CUSTOMER] Deleted ${deletedReviews} review document(s) for customer ${customerId}.`);
+    } catch (revErr) {
+      console.error(`[DELETE CUSTOMER ERROR] Failed deleting reviews for customer ${customerId}: ${revErr.message}`);
+    }
+
+    // Step 2: Delete all app documents for this customer
+    try {
+      const appSnap = await db.collection('apps').where('customerId', '==', customerId).get();
+      for (const doc of appSnap.docs) {
+        await doc.ref.delete();
+        deletedApps++;
+      }
+      console.log(`[DELETE CUSTOMER] Deleted ${deletedApps} app document(s) for customer ${customerId}.`);
+    } catch (appErr) {
+      console.error(`[DELETE CUSTOMER ERROR] Failed deleting apps for customer ${customerId}: ${appErr.message}`);
+    }
+
+    // Step 3: Delete customer's Firebase Authentication account
+    try {
+      const userRecord = await admin.auth().getUserByEmail(customer.email.toLowerCase());
+      if (userRecord && userRecord.uid) {
+        await admin.auth().deleteUser(userRecord.uid);
+        authAccountDeleted = true;
+        console.log(`[DELETE CUSTOMER] Deleted Firebase Auth user ${userRecord.uid} (${customer.email}).`);
+      }
+    } catch (authErr) {
+      if (authErr.code === 'auth/user-not-found') {
+        console.log(`[DELETE CUSTOMER] No Firebase Auth user found for ${customer.email} (skipping auth deletion).`);
+      } else {
+        console.error(`[DELETE CUSTOMER ERROR] Failed deleting Firebase Auth account for ${customer.email}: ${authErr.message}`);
+      }
+    }
+
+    // Step 4: Delete the customer document from customers collection
+    try {
+      await db.collection('customers').doc(customerId).delete();
+      customerDeleted = true;
+      console.log(`[DELETE CUSTOMER] Deleted customer document ${customerId} from Firestore.`);
+    } catch (custErr) {
+      console.error(`[DELETE CUSTOMER ERROR] Failed deleting customer document ${customerId}: ${custErr.message}`);
+    }
+
+    const authLabel = authAccountDeleted ? 'auth account' : 'no auth account';
+    const message = `Deleted: ${deletedReviews} review(s), ${deletedApps} app(s), ${authLabel}, customer record.`;
+
+    return res.status(200).json({
+      success: true,
+      deletedReviews,
+      deletedApps,
+      authAccountDeleted,
+      customerDeleted,
+      message,
+    });
+  } catch (error) {
+    console.error(`[DELETE CUSTOMER CRITICAL ERROR] Failure deleting customer ${customerId}: ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      error: `Failed to delete customer: ${error.message}`,
     });
   }
 });
@@ -1044,6 +1214,13 @@ router.get('/customers/by-email', async (req, res) => {
       return res.status(200).json({
         success: true,
         exists: false,
+      });
+    }
+
+    if (customer.active === false) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account has been suspended. Please contact support.',
       });
     }
 
@@ -1085,6 +1262,7 @@ router.get('/customers/by-email', async (req, res) => {
  * POST /api/customers/create
  * Creates a new customer record with encrypted service account credentials and AWAITING_VERIFICATION status,
  * AND automatically creates their first app document in the "apps" collection.
+ * Enforces global package name uniqueness.
  * Protected by HTTP Basic Auth.
  * Payload: { "name": "...", "email": "...", "appName": "...", "packageName": "...", "serviceAccountJson": { ... } }
  */
@@ -1111,6 +1289,8 @@ router.post('/customers/create', requireAdminBasicAuth, async (req, res) => {
   if (!serviceAccountJson || (typeof serviceAccountJson !== 'object' && typeof serviceAccountJson !== 'string')) {
     return res.status(400).json({ success: false, error: 'Service Account JSON is required.' });
   }
+
+  const trimmedPackage = packageName.trim();
 
   // 2. Parse and validate JSON structure & required Google Service Account fields
   let parsedJson = serviceAccountJson;
@@ -1143,12 +1323,21 @@ router.post('/customers/create', requireAdminBasicAuth, async (req, res) => {
       });
     }
 
+    // Check for duplicate package name across ALL accounts
+    const existingApp = await findAppByPackageName(trimmedPackage);
+    if (existingApp) {
+      return res.status(400).json({
+        success: false,
+        error: 'This package name is already connected to another account.',
+      });
+    }
+
     // 4. Create customer record in Firestore
     const newCustomer = await addCustomer({
       name: name.trim(),
       email: email.trim(),
       appName: appName.trim(),
-      packageName: packageName.trim(),
+      packageName: trimmedPackage,
       serviceAccountJson: parsedJson,
       onboardingStatus: 'AWAITING_VERIFICATION',
     });
@@ -1157,7 +1346,7 @@ router.post('/customers/create', requireAdminBasicAuth, async (req, res) => {
     const newApp = await addApp({
       customerId: newCustomer.id,
       appName: appName.trim(),
-      packageName: packageName.trim(),
+      packageName: trimmedPackage,
     });
 
     return res.status(200).json({
